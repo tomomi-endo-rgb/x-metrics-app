@@ -22,32 +22,33 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-# ─── 認証 ──────────────────────────────────────────────────
-if not st.user.is_logged_in:
+# ─── 認証（簡易パスワード） ────────────────────────────────
+if "authenticated" not in st.session_state:
+    st.session_state.authenticated = False
+
+if not st.session_state.authenticated:
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         st.markdown("<br><br><br>", unsafe_allow_html=True)
         st.title("𝕏 Metrics")
         st.markdown("スプレッドシートのXポスト数値を自動取得します")
         st.markdown("<br>", unsafe_allow_html=True)
-        st.button(
-            "🔑 Googleでログイン",
-            on_click=st.login,
-            kwargs={"provider": "google"},
-            use_container_width=True,
-            type="primary",
-        )
+        pw = st.text_input("パスワード", type="password")
+        if st.button("ログイン", use_container_width=True, type="primary"):
+            if pw == st.secrets.get("APP_PASSWORD", "xmetrics2024"):
+                st.session_state.authenticated = True
+                st.rerun()
+            else:
+                st.error("パスワードが違います")
     st.stop()
-
-user = st.user
-
 
 # ─── サイドバー ─────────────────────────────────────────────
 with st.sidebar:
-    st.markdown(f"### 👤 {user.name or user.email}")
-    st.caption(user.email)
+    st.markdown("### 𝕏 Metrics")
     st.divider()
-    st.button("🚪 ログアウト", on_click=st.logout, use_container_width=True)
+    if st.button("🚪 ログアウト", use_container_width=True):
+        st.session_state.authenticated = False
+        st.rerun()
 
 
 # ─── ユーティリティ ─────────────────────────────────────────
