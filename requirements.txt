@@ -1,0 +1,5 @@
+streamlit>=1.41.0
+gspread
+google-auth
+httpx
+pandas
