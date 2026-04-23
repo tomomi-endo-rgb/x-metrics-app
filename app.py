@@ -1,11 +1,12 @@
 import streamlit as st
 import gspread
-from google.oauth2.service_account import Credentials
+from google.oauth2.credentials import Credentials
 import httpx
 import re
 import json
 from datetime import date
 import pandas as pd
+from urllib.parse import urlencode
 
 # ─── ページ設定 ────────────────────────────────────────────
 st.set_page_config(
@@ -21,39 +22,105 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# ─── OAuth設定 ─────────────────────────────────────────────
+REDIRECT_URI = "https://x-metrics-app.streamlit.app/"
+SCOPES = " ".join([
+    "openid",
+    "https://www.googleapis.com/auth/userinfo.email",
+    "https://www.googleapis.com/auth/userinfo.profile",
+    "https://www.googleapis.com/auth/spreadsheets",
+])
 
-# ─── 認証（簡易パスワード） ────────────────────────────────
-if "authenticated" not in st.session_state:
-    st.session_state.authenticated = False
 
-if not st.session_state.authenticated:
+def get_auth_url() -> str:
+    params = {
+        "client_id": st.secrets["GOOGLE_CLIENT_ID"],
+        "redirect_uri": REDIRECT_URI,
+        "response_type": "code",
+        "scope": SCOPES,
+        "access_type": "offline",
+        "prompt": "select_account",
+    }
+    return f"https://accounts.google.com/o/oauth2/v2/auth?{urlencode(params)}"
+
+
+def exchange_code(code: str) -> dict:
+    resp = httpx.post(
+        "https://oauth2.googleapis.com/token",
+        data={
+            "code": code,
+            "client_id": st.secrets["GOOGLE_CLIENT_ID"],
+            "client_secret": st.secrets["GOOGLE_CLIENT_SECRET"],
+            "redirect_uri": REDIRECT_URI,
+            "grant_type": "authorization_code",
+        },
+        timeout=15,
+    )
+    return resp.json()
+
+
+def get_user_info(access_token: str) -> dict:
+    resp = httpx.get(
+        "https://www.googleapis.com/oauth2/v3/userinfo",
+        headers={"Authorization": f"Bearer {access_token}"},
+        timeout=10,
+    )
+    return resp.json()
+
+
+# ─── OAuthコールバック処理 ─────────────────────────────────
+params = st.query_params
+if "code" in params and "oauth_token" not in st.session_state:
+    with st.spinner("ログイン処理中..."):
+        token_data = exchange_code(params["code"])
+        if "access_token" in token_data:
+            user_info = get_user_info(token_data["access_token"])
+            st.session_state.oauth_token = token_data
+            st.session_state.user_info = user_info
+            st.query_params.clear()
+            st.rerun()
+        else:
+            st.error(f"ログインエラー: {token_data.get('error_description', token_data)}")
+            st.stop()
+
+# ─── 認証チェック ──────────────────────────────────────────
+if "oauth_token" not in st.session_state:
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         st.markdown("<br><br><br>", unsafe_allow_html=True)
         st.title("𝕏 Metrics")
         st.markdown("スプレッドシートのXポスト数値を自動取得します")
         st.markdown("<br>", unsafe_allow_html=True)
-        pw = st.text_input("パスワード", type="password")
-        if st.button("ログイン", use_container_width=True, type="primary"):
-            if pw == st.secrets.get("APP_PASSWORD", "xmetrics2024"):
-                st.session_state.authenticated = True
-                st.rerun()
-            else:
-                st.error("パスワードが違います")
+        auth_url = get_auth_url()
+        st.markdown(
+            f'<a href="{auth_url}" target="_self">'
+            f'<button style="background:#000;color:#fff;border:none;padding:12px 24px;'
+            f'border-radius:8px;font-size:16px;cursor:pointer;width:100%">'
+            f'🔑 Googleでログイン</button></a>',
+            unsafe_allow_html=True,
+        )
     st.stop()
+
+# ─── ログイン済み ──────────────────────────────────────────
+user_info = st.session_state.user_info
+token_data = st.session_state.oauth_token
 
 # ─── サイドバー ─────────────────────────────────────────────
 with st.sidebar:
-    st.markdown("### 𝕏 Metrics")
+    pic = user_info.get("picture", "")
+    if pic:
+        st.image(pic, width=48)
+    st.markdown(f"**{user_info.get('name', '')}**")
+    st.caption(user_info.get("email", ""))
     st.divider()
     if st.button("🚪 ログアウト", use_container_width=True):
-        st.session_state.authenticated = False
+        del st.session_state.oauth_token
+        del st.session_state.user_info
         st.rerun()
 
 
 # ─── ユーティリティ ─────────────────────────────────────────
 def col_letter(n: int) -> str:
-    """列番号 → アルファベット (1→A, 27→AA)"""
     s = ""
     while n > 0:
         n, r = divmod(n - 1, 26)
@@ -70,16 +137,13 @@ def find_col(headers: list, candidates: list):
 
 
 def fetch_x(url: str) -> dict:
-    """Twitter API v2 でメトリクス取得"""
     try:
         token = st.secrets.get("TWITTER_BEARER_TOKEN", "")
         if not token:
             return {"再生数": "Token未設定", "いいね": "-", "保存": "-"}
-
         m = re.search(r"/status/(\d+)", url)
         if not m:
             return {"再生数": "URL不正", "いいね": "-", "保存": "-"}
-
         resp = httpx.get(
             f"https://api.twitter.com/2/tweets/{m.group(1)}",
             headers={"Authorization": f"Bearer {token}"},
@@ -116,29 +180,30 @@ if sheet_input:
     sheet_id = m.group(1) if m else sheet_input.strip()
 
 st.markdown("<br>", unsafe_allow_html=True)
-run = st.button("▶ 取得開始", disabled=not sheet_id, type="primary", use_container_width=False)
+run = st.button("▶ 取得開始", disabled=not sheet_id, type="primary")
 
 if run:
     try:
         with st.spinner("シートに接続中..."):
-            creds_raw = st.secrets["GCP_SERVICE_ACCOUNT"]
-            creds_info = json.loads(creds_raw) if isinstance(creds_raw, str) else dict(creds_raw)
-            creds = Credentials.from_service_account_info(
-                creds_info,
+            creds = Credentials(
+                token=token_data["access_token"],
+                refresh_token=token_data.get("refresh_token"),
+                token_uri="https://oauth2.googleapis.com/token",
+                client_id=st.secrets["GOOGLE_CLIENT_ID"],
+                client_secret=st.secrets["GOOGLE_CLIENT_SECRET"],
                 scopes=["https://www.googleapis.com/auth/spreadsheets"],
             )
             gc = gspread.authorize(creds)
             ws = gc.open_by_key(sheet_id).get_worksheet(sheet_index)
             headers = ws.row_values(1)
 
-        # 列検索
         url_col  = find_col(headers, ["XURL", "X URL", "xurl"])
-        imp_col  = find_col(headers, ["XImp", "X Imp", "Ximp", "X再生数", "Xインプ"])
+        imp_col  = find_col(headers, ["XImp", "X Imp", "Ximp", "X再生数"])
         like_col = find_col(headers, ["Xいいね", "X いいね", "xlike"])
-        save_col = find_col(headers, ["X保存", "X 保存", "xbookmark", "Xbookmark"])
+        save_col = find_col(headers, ["X保存", "X 保存", "xbookmark"])
 
         if not url_col:
-            st.error("❌ 「XURL」列が見つかりません。1行目のヘッダーを確認してください。")
+            st.error("❌ 「XURL」列が見つかりません")
             st.write("検出されたヘッダー:", headers)
             st.stop()
 
@@ -151,7 +216,6 @@ if run:
         st.success("✅ シート接続完了")
         st.info("  |  ".join(f"**{k}** → {v}列" for k, v in col_map.items()))
 
-        # URLリスト取得
         all_rows = ws.get_all_values()
         url_rows = [
             (i + 2, row[url_col - 1].strip())
@@ -164,15 +228,12 @@ if run:
             st.stop()
 
         st.info(f"📋 {len(url_rows)} 件のURLを検出")
-
-        # 取得 & 書き戻し
         progress = st.progress(0)
         status = st.empty()
         results = []
 
         for idx, (row_num, url) in enumerate(url_rows):
             status.markdown(f"⏳ `{idx + 1}/{len(url_rows)}` 取得中…  `{url[:70]}`")
-
             metrics = fetch_x(url)
             results.append({"行": row_num, "URL": url, **metrics})
 
@@ -191,13 +252,10 @@ if run:
         status.empty()
         st.balloons()
         st.success(f"🎉 完了！ {len(url_rows)} 件をシートに書き込みました（{date.today()}）")
-
         df = pd.DataFrame(results)
         st.dataframe(df, use_container_width=True, hide_index=True)
 
-    except KeyError as e:
-        st.error(f"シークレット設定エラー: {e} が未設定です")
     except gspread.exceptions.SpreadsheetNotFound:
-        st.error("スプレッドシートが見つかりません。IDを確認するか、サービスアカウントとシートを共有してください")
+        st.error("スプレッドシートが見つかりません。URLを確認してください")
     except Exception as e:
         st.error(f"エラー: {e}")
