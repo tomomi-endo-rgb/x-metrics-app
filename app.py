@@ -734,19 +734,25 @@ elif st.session_state.page == "logs":
     if "last_sheet_id" not in st.session_state:
         st.session_state.last_sheet_id = ""
 
-    with st.container(border=True):
-        log_input = st.text_input(
-            "スプレッドシートのURLまたはID",
-            value=st.session_state.get("last_sheet_id", ""),
-            placeholder="https://docs.google.com/spreadsheets/d/xxxxxxxx/edit",
-            key="log_sheet_input",
-        )
+    log_sheet_id = st.session_state.get("last_sheet_id", "")
 
-        log_sheet_id = ""
-        if log_input:
-            m = re.search(r"/spreadsheets/d/([a-zA-Z0-9-_]+)", log_input)
-            log_sheet_id = m.group(1) if m else log_input.strip()
+    # まだシートが選ばれていない場合：URL入力を促す
+    if not log_sheet_id:
+        with st.container(border=True):
+            st.info("📭 履歴を表示するには、先に「📊 数値を取得する」から実行するか、下にURLを入力してください")
+            log_input = st.text_input(
+                "スプレッドシートのURLまたはID",
+                placeholder="https://docs.google.com/spreadsheets/d/xxxxxxxx/edit",
+                key="log_sheet_input_init",
+            )
+            if log_input:
+                m = re.search(r"/spreadsheets/d/([a-zA-Z0-9-_]+)", log_input)
+                new_id = m.group(1) if m else log_input.strip()
+                if new_id:
+                    st.session_state.last_sheet_id = new_id
+                    st.rerun()
 
+    # シートIDがあればログを表示
     if log_sheet_id:
         try:
             with st.spinner("ログを読み込み中..."):
@@ -763,12 +769,14 @@ elif st.session_state.page == "logs":
                 try:
                     log_ws = workbook.worksheet(LOG_SHEET_NAME)
                     log_records = log_ws.get_all_records()
+                    sheet_title = workbook.title
                 except gspread.exceptions.WorksheetNotFound:
                     log_records = []
+                    sheet_title = workbook.title
 
             if not log_records:
                 with st.container(border=True):
-                    st.info("📭 まだ実行履歴がありません。「📊 数値を取得する」から実行すると履歴が記録されます。")
+                    st.info(f"📭 「**{sheet_title}**」にはまだ実行履歴がありません。\n\n「📊 数値を取得する」から実行すると履歴が記録されます。")
             else:
                 # 集計サマリー
                 df = pd.DataFrame(log_records)
@@ -779,6 +787,15 @@ elif st.session_state.page == "logs":
                 partial_runs = (df["ステータス"] == "一部失敗").sum() if "ステータス" in df.columns else 0
                 failed_runs = (df["ステータス"] == "失敗").sum() if "ステータス" in df.columns else 0
 
+                # シート切り替えボタン
+                col_title, col_btn = st.columns([5, 1])
+                with col_title:
+                    st.markdown(f"📄 **{sheet_title}** の履歴")
+                with col_btn:
+                    if st.button("🔄 別シート", use_container_width=True, key="switch_sheet"):
+                        st.session_state.last_sheet_id = ""
+                        st.rerun()
+
                 with st.container(border=True):
                     cols = st.columns(4)
                     cols[0].metric("実行回数", total_runs)
@@ -787,7 +804,22 @@ elif st.session_state.page == "logs":
                     cols[3].metric("❌ 失敗", int(failed_runs))
 
                 with st.container(border=True):
-                    st.markdown("#### 実行履歴一覧")
+                    # 検索＆フィルタ
+                    col_search, col_filter = st.columns([3, 2])
+                    with col_search:
+                        search_query = st.text_input(
+                            "🔍 検索",
+                            placeholder="ID・日付・件数などで絞り込み",
+                            label_visibility="collapsed",
+                            key="log_search",
+                        )
+                    with col_filter:
+                        status_filter = st.selectbox(
+                            "ステータス",
+                            ["すべて", "✅ 成功", "⚠️ 一部失敗", "❌ 失敗"],
+                            label_visibility="collapsed",
+                            key="log_filter",
+                        )
 
                     # ステータスをアイコン付きで表示
                     if "ステータス" in df.columns:
@@ -797,8 +829,22 @@ elif st.session_state.page == "logs":
                             "失敗": "❌ 失敗",
                         }).fillna(df["ステータス"])
 
+                    # フィルタ適用
+                    filtered_df = df.copy()
+                    if status_filter != "すべて":
+                        filtered_df = filtered_df[filtered_df["ステータス"] == status_filter]
+                    if search_query:
+                        q = search_query.lower()
+                        mask = filtered_df.apply(
+                            lambda row: q in " ".join(str(v) for v in row.values).lower(),
+                            axis=1,
+                        )
+                        filtered_df = filtered_df[mask]
+
+                    st.caption(f"{len(filtered_df)} / {len(df)} 件を表示")
+
                     st.dataframe(
-                        df,
+                        filtered_df,
                         use_container_width=True,
                         hide_index=True,
                         column_config={
@@ -814,11 +860,11 @@ elif st.session_state.page == "logs":
                     )
         except (gspread.exceptions.SpreadsheetNotFound, PermissionError):
             st.error("❌ スプレッドシートにアクセスできません。共有設定を確認してください")
+            if st.button("🔄 別のシートを指定", key="reset_sheet"):
+                st.session_state.last_sheet_id = ""
+                st.rerun()
         except Exception as e:
             st.error(f"❌ エラー: {str(e) or type(e).__name__}")
-    else:
-        with st.container(border=True):
-            st.info("👆 上にスプレッドシートのURLを入力すると、そのシートの実行履歴が表示されます")
 
 
 # ═══════════════════════════════════════════════════════════
