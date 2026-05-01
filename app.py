@@ -291,23 +291,62 @@ def _syndication_token(tweet_id: str) -> str:
     return re.sub(r"(0+|\.)", "", full)
 
 
-def fetch_x(url: str) -> dict:
+def _extract_views(data: dict):
+    """様々なフィールドから再生数を取得"""
+    # パターン1: views.count
+    if isinstance(data.get("views"), dict):
+        v = data["views"].get("count")
+        if v is not None:
+            return v
+    # パターン2: view_count_info.count
+    if isinstance(data.get("view_count_info"), dict):
+        v = data["view_count_info"].get("count")
+        if v is not None:
+            return v
+    # パターン3: ext_views.count
+    if isinstance(data.get("ext_views"), dict):
+        v = data["ext_views"].get("count")
+        if v is not None:
+            return v
+    # パターン4: 直接 view_count
+    if data.get("view_count") is not None:
+        return data["view_count"]
+    # パターン5: video_view_count
+    if data.get("video_view_count") is not None:
+        return data["video_view_count"]
+    return "-"
+
+
+def fetch_x(url: str, return_raw: bool = False):
     """X(Twitter)の公開Syndication APIを使って数値を取得（Token不要）"""
     try:
         m = re.search(r"/status/(\d+)", url)
         if not m:
-            return {"再生数": "URL不正", "いいね": "-", "保存": "-"}
+            result = {"再生数": "URL不正", "いいね": "-", "保存": "-"}
+            return (result, None) if return_raw else result
         tweet_id = m.group(1)
         token = _syndication_token(tweet_id)
 
         resp = httpx.get(
             "https://cdn.syndication.twimg.com/tweet-result",
-            params={"id": tweet_id, "token": token, "lang": "ja"},
+            params={
+                "id": tweet_id,
+                "token": token,
+                "lang": "ja",
+                "features": "tfw_timeline_list:;tfw_follower_count_sunset:true;"
+                            "tfw_tweet_edit_backend:on;tfw_refsrc_session:on;"
+                            "tfw_show_business_verified_badge:on;"
+                            "tfw_duplicate_scribes_to_settings:on;"
+                            "tfw_show_blue_verified_badge:on;"
+                            "tfw_legacy_timeline_sunset:true;"
+                            "tfw_tweet_edit_frontend:on",
+            },
             headers={
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                               "AppleWebKit/537.36 (KHTML, like Gecko) "
                               "Chrome/120.0.0.0 Safari/537.36",
                 "Accept": "application/json",
+                "Referer": "https://platform.twitter.com/",
             },
             timeout=20,
             follow_redirects=True,
@@ -315,30 +354,20 @@ def fetch_x(url: str) -> dict:
 
         if resp.status_code == 200:
             data = resp.json()
-            # 再生数（動画の場合のみ取得可能）
-            views = "-"
-            if isinstance(data.get("views"), dict):
-                views = data["views"].get("count", "-")
-            elif data.get("view_count"):
-                views = data["view_count"]
-            elif data.get("mediaDetails"):
-                # 動画の再生数を探す
-                for media in data["mediaDetails"]:
-                    if isinstance(media, dict) and media.get("video_info"):
-                        # video_infoがある = 動画
-                        views = data.get("favorite_count", "-")
-                        break
-
-            return {
-                "再生数": views,
+            result = {
+                "再生数": _extract_views(data),
                 "いいね": data.get("favorite_count", "-"),
                 "保存": data.get("bookmark_count", "-"),
             }
+            return (result, data) if return_raw else result
         elif resp.status_code == 404:
-            return {"再生数": "削除済み", "いいね": "-", "保存": "-"}
-        return {"再生数": f"取得失敗 ({resp.status_code})", "いいね": "-", "保存": "-"}
+            result = {"再生数": "削除済み", "いいね": "-", "保存": "-"}
+            return (result, None) if return_raw else result
+        result = {"再生数": f"取得失敗 ({resp.status_code})", "いいね": "-", "保存": "-"}
+        return (result, None) if return_raw else result
     except Exception as e:
-        return {"再生数": "エラー", "いいね": "-", "保存": str(e)[:40]}
+        result = {"再生数": "エラー", "いいね": "-", "保存": str(e)[:40]}
+        return (result, None) if return_raw else result
 
 
 # ═══════════════════════════════════════════════════════════
@@ -362,6 +391,24 @@ if st.session_state.page == "fetch":
 
         st.markdown("<br>", unsafe_allow_html=True)
         run = st.button("▶ 取得開始", disabled=not sheet_id, type="primary", use_container_width=False)
+
+    # デバッグ用：1件テスト
+    with st.expander("🔧 1件だけテスト取得（デバッグ用）"):
+        st.caption("APIが何を返してくるか確認できます。数値が取れない場合に使ってください。")
+        test_url = st.text_input(
+            "テスト用 XのURL",
+            placeholder="https://x.com/username/status/1234567890",
+            key="debug_url",
+        )
+        if st.button("🔍 テスト取得", key="debug_btn"):
+            if test_url:
+                with st.spinner("取得中..."):
+                    metrics, raw = fetch_x(test_url, return_raw=True)
+                st.markdown("**取得結果：**")
+                st.json(metrics)
+                if raw:
+                    st.markdown("**APIの生レスポンス（全フィールド）：**")
+                    st.json(raw, expanded=False)
 
     if run:
         try:
