@@ -398,19 +398,33 @@ if st.session_state.page == "fetch":
                 df = pd.DataFrame(results)
                 st.dataframe(df, use_container_width=True, hide_index=True)
 
-        except gspread.exceptions.SpreadsheetNotFound:
-            st.error("❌ スプレッドシートが見つかりません。サービスアカウントへの共有設定を確認してください（⚙️設定ページ参照）")
+        except (gspread.exceptions.SpreadsheetNotFound, PermissionError):
+            st.error(
+                "❌ スプレッドシートにアクセスできません。\n\n"
+                "**スプレッドシートを以下のメールアドレスに「編集者」権限で共有してください：**"
+            )
+            st.code("x-metrics-sheets@x-metrics-494110.iam.gserviceaccount.com", language=None)
+            st.markdown(
+                "👉 スプレッドシートの右上「**共有**」ボタン → メールアドレスを貼り付け → 権限を「**編集者**」にして「送信」"
+            )
         except gspread.exceptions.APIError as e:
-            st.error(f"❌ Google Sheets APIエラー: {e}")
-            with st.expander("詳細"):
-                st.code(traceback.format_exc())
+            err_text = str(e)
+            if "PERMISSION_DENIED" in err_text or "403" in err_text:
+                st.error(
+                    "❌ スプレッドシートにアクセスできません。\n\n"
+                    "**スプレッドシートを以下のメールアドレスに「編集者」権限で共有してください：**"
+                )
+                st.code("x-metrics-sheets@x-metrics-494110.iam.gserviceaccount.com", language=None)
+                st.markdown(
+                    "👉 スプレッドシートの右上「**共有**」ボタン → メールアドレスを貼り付け → 権限を「**編集者**」にして「送信」"
+                )
+            else:
+                st.error(f"❌ Google Sheets APIエラー: {err_text}")
         except KeyError as e:
             st.error(f"❌ シークレット設定エラー（{e} が見つかりません）")
         except Exception as e:
             err_msg = str(e) or type(e).__name__
             st.error(f"❌ エラー: {err_msg}")
-            with st.expander("詳細（クリックで展開）"):
-                st.code(traceback.format_exc())
 
 
 # ═══════════════════════════════════════════════════════════
@@ -530,10 +544,8 @@ elif st.session_state.page == "settings":
                         wb = gc.open_by_key(test_id)
                         sheets = [ws.title for ws in wb.worksheets()]
                     st.success(f"✅ 接続成功！　シート一覧: {', '.join(sheets)}")
-                except gspread.exceptions.SpreadsheetNotFound:
-                    st.error("❌ スプレッドシートが見つかりません。共有設定を確認してください")
+                except (gspread.exceptions.SpreadsheetNotFound, PermissionError):
+                    st.error("❌ アクセスできません。サービスアカウントに「編集者」権限で共有されているか確認してください")
                 except Exception as e:
                     err_msg = str(e) or type(e).__name__
                     st.error(f"❌ エラー: {err_msg}")
-                    with st.expander("詳細"):
-                        st.code(traceback.format_exc())
