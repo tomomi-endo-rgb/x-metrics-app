@@ -4,6 +4,7 @@ from google.oauth2.service_account import Credentials
 import httpx
 import re
 import json
+import math
 import traceback
 from datetime import date
 import pandas as pd
@@ -258,30 +259,86 @@ def find_col(headers: list, candidates: list):
     return None
 
 
+def _syndication_token(tweet_id: str) -> str:
+    """Twitter Syndication API用のtokenを生成
+    JS: ((Number(id) / 1e15) * Math.PI).toString(36).replace(/(0+|\.)/g, '')
+    """
+    n = (int(tweet_id) / 1e15) * math.pi
+    chars = "0123456789abcdefghijklmnopqrstuvwxyz"
+
+    # 整数部
+    int_part = int(n)
+    int_str = ""
+    if int_part == 0:
+        int_str = "0"
+    else:
+        while int_part > 0:
+            int_part, r = divmod(int_part, 36)
+            int_str = chars[r] + int_str
+
+    # 小数部（精度15桁）
+    frac = n - int(n)
+    frac_str = ""
+    for _ in range(15):
+        frac *= 36
+        digit = int(frac)
+        frac_str += chars[digit]
+        frac -= digit
+        if frac == 0:
+            break
+
+    full = int_str + ("." + frac_str if frac_str else "")
+    return re.sub(r"(0+|\.)", "", full)
+
+
 def fetch_x(url: str) -> dict:
+    """X(Twitter)の公開Syndication APIを使って数値を取得（Token不要）"""
     try:
-        token = st.secrets.get("TWITTER_BEARER_TOKEN", "")
-        if not token:
-            return {"再生数": "Token未設定", "いいね": "-", "保存": "-"}
         m = re.search(r"/status/(\d+)", url)
         if not m:
             return {"再生数": "URL不正", "いいね": "-", "保存": "-"}
+        tweet_id = m.group(1)
+        token = _syndication_token(tweet_id)
+
         resp = httpx.get(
-            f"https://api.twitter.com/2/tweets/{m.group(1)}",
-            headers={"Authorization": f"Bearer {token}"},
-            params={"tweet.fields": "public_metrics"},
-            timeout=15,
+            "https://cdn.syndication.twimg.com/tweet-result",
+            params={"id": tweet_id, "token": token, "lang": "ja"},
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                              "AppleWebKit/537.36 (KHTML, like Gecko) "
+                              "Chrome/120.0.0.0 Safari/537.36",
+                "Accept": "application/json",
+            },
+            timeout=20,
+            follow_redirects=True,
         )
+
         if resp.status_code == 200:
-            pm = resp.json()["data"]["public_metrics"]
+            data = resp.json()
+            # 再生数（動画の場合のみ取得可能）
+            views = "-"
+            if isinstance(data.get("views"), dict):
+                views = data["views"].get("count", "-")
+            elif data.get("view_count"):
+                views = data["view_count"]
+            elif data.get("mediaDetails"):
+                # 動画の再生数を探す
+                for media in data["mediaDetails"]:
+                    if isinstance(media, dict) and media.get("video_info"):
+                        # video_infoがある = 動画
+                        views = data.get("favorite_count", "-")
+                        break
+
             return {
-                "再生数": pm.get("impression_count", "-"),
-                "いいね": pm.get("like_count", "-"),
-                "保存": pm.get("bookmark_count", "-"),
+                "再生数": views,
+                "いいね": data.get("favorite_count", "-"),
+                "保存": data.get("bookmark_count", "-"),
             }
-        return {"再生数": f"API Error {resp.status_code}", "いいね": "-", "保存": "-"}
+        elif resp.status_code == 404:
+            return {"再生数": "削除済み", "いいね": "-", "保存": "-"}
+        return {"再生数": f"取得失敗 ({resp.status_code})", "いいね": "-", "保存": "-"}
     except Exception as e:
-        return {"再生数": "エラー", "いいね": "エラー", "保存": str(e)[:40]}
+        return {"再生数": "エラー", "いいね": "-", "保存": str(e)[:40]}
 
 
 # ═══════════════════════════════════════════════════════════
@@ -478,16 +535,24 @@ elif st.session_state.page == "howto":
 スペースや全角文字が混じっていると認識されません。
             """)
 
-        with st.expander("数値が「API Error 429」になる"):
+        with st.expander("数値が「-」のまま取れない"):
             st.markdown("""
-Twitter APIのレート制限に達しています。
-しばらく時間をおいてから再度お試しください。
+- **いいね**：通常はほぼすべて取得可能
+- **再生数**：動画ツイートのみ取得可能（テキストのみのツイートは取得不可）
+- **保存数**：取得不可（Xの公開APIで提供されていません）
             """)
 
-        with st.expander("数値が「Token未設定」になる"):
+        with st.expander("「削除済み」と表示される"):
             st.markdown("""
-Streamlit CloudのSecretsに`TWITTER_BEARER_TOKEN`が設定されていません。
-管理者にご連絡ください。
+ツイートが削除されたか、非公開アカウントの可能性があります。
+URLが正しいか、ツイートが現在も公開されているか確認してください。
+            """)
+
+        with st.expander("「取得失敗 (xxx)」エラーが出る"):
+            st.markdown("""
+- `429`: アクセスが集中しています。しばらく待ってから再試行してください
+- `403`: アクセスが拒否されました（一時的な制限の可能性）
+- `404`: ツイートが見つかりません（削除/非公開の可能性）
             """)
 
 
