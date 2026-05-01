@@ -224,6 +224,7 @@ with st.sidebar:
     # ナビゲーション定義
     nav_items = [
         ("fetch",    "📊  数値を取得する"),
+        ("sheets",   "📂  対象シート管理"),
         ("logs",     "📋  実行ログ"),
         ("howto",    "📖  使い方"),
         ("settings", "⚙️  設定・シート共有"),
@@ -261,48 +262,144 @@ def find_col(headers: list, candidates: list):
     return None
 
 
-LOG_SHEET_NAME = "_実行ログ"
-LOG_HEADERS = ["ID", "実行時刻", "実行種別", "対象件数", "成功", "失敗", "所要時間", "ステータス"]
+SHEETS_TAB = "_登録シート"
+LOGS_TAB = "_実行ログ"
+SHEETS_HEADERS = ["シートID", "表示名", "登録日"]
+LOGS_HEADERS = ["ID", "実行時刻", "シート名", "シートID", "種別", "件数", "成功", "失敗", "所要時間", "ステータス", "URL一覧"]
 
 
-def get_or_create_log_sheet(workbook):
-    """ログ用シートを取得（なければ作成）"""
+def get_gspread_client():
+    """gspreadクライアントを取得"""
+    creds_raw = st.secrets["GCP_SERVICE_ACCOUNT"]
+    creds_info = json.loads(creds_raw) if isinstance(creds_raw, str) else dict(creds_raw)
+    creds = Credentials.from_service_account_info(
+        creds_info,
+        scopes=["https://www.googleapis.com/auth/spreadsheets",
+                "https://www.googleapis.com/auth/drive.readonly"],
+    )
+    return gspread.authorize(creds)
+
+
+def get_manager_workbook():
+    """管理用スプレッドシートを取得（未設定ならNone）"""
+    sheet_id = st.secrets.get("MANAGER_SHEET_ID", "")
+    if not sheet_id:
+        return None
     try:
-        log_ws = workbook.worksheet(LOG_SHEET_NAME)
-        # ヘッダー確認
-        first_row = log_ws.row_values(1)
-        if not first_row or first_row != LOG_HEADERS:
-            log_ws.clear()
-            log_ws.append_row(LOG_HEADERS)
-        return log_ws
+        gc = get_gspread_client()
+        return gc.open_by_key(sheet_id)
+    except Exception:
+        return None
+
+
+def ensure_manager_tabs(workbook):
+    """管理用シートに必要なタブを確保"""
+    sheets_ws = None
+    logs_ws = None
+    try:
+        sheets_ws = workbook.worksheet(SHEETS_TAB)
     except gspread.exceptions.WorksheetNotFound:
-        log_ws = workbook.add_worksheet(title=LOG_SHEET_NAME, rows=1000, cols=10)
-        log_ws.append_row(LOG_HEADERS)
-        # ヘッダー行を太字に
+        sheets_ws = workbook.add_worksheet(title=SHEETS_TAB, rows=200, cols=5)
+        sheets_ws.append_row(SHEETS_HEADERS)
         try:
-            log_ws.format("A1:H1", {"textFormat": {"bold": True}})
+            sheets_ws.format("A1:C1", {"textFormat": {"bold": True}})
         except Exception:
             pass
-        return log_ws
 
-
-def append_log(workbook, log_data: dict):
-    """実行ログを追記"""
     try:
-        log_ws = get_or_create_log_sheet(workbook)
-        log_ws.append_row([
-            log_data["id"],
-            log_data["timestamp"],
-            log_data["type"],
-            log_data["total"],
-            log_data["success"],
-            log_data["fail"],
-            log_data["duration"],
-            log_data["status"],
+        logs_ws = workbook.worksheet(LOGS_TAB)
+    except gspread.exceptions.WorksheetNotFound:
+        logs_ws = workbook.add_worksheet(title=LOGS_TAB, rows=2000, cols=15)
+        logs_ws.append_row(LOGS_HEADERS)
+        try:
+            logs_ws.format("A1:K1", {"textFormat": {"bold": True}})
+        except Exception:
+            pass
+
+    return sheets_ws, logs_ws
+
+
+def get_registered_sheets():
+    """登録済みシート一覧を取得"""
+    wb = get_manager_workbook()
+    if not wb:
+        return []
+    try:
+        sheets_ws, _ = ensure_manager_tabs(wb)
+        return sheets_ws.get_all_records()
+    except Exception:
+        return []
+
+
+def add_registered_sheet(sheet_id: str, display_name: str) -> bool:
+    """シートを登録"""
+    wb = get_manager_workbook()
+    if not wb:
+        return False
+    try:
+        sheets_ws, _ = ensure_manager_tabs(wb)
+        # 重複チェック
+        existing = sheets_ws.get_all_records()
+        for r in existing:
+            if r.get("シートID") == sheet_id:
+                return False
+        sheets_ws.append_row([sheet_id, display_name, datetime.now().strftime("%Y/%m/%d")])
+        return True
+    except Exception:
+        return False
+
+
+def remove_registered_sheet(sheet_id: str) -> bool:
+    """シートを登録解除"""
+    wb = get_manager_workbook()
+    if not wb:
+        return False
+    try:
+        sheets_ws, _ = ensure_manager_tabs(wb)
+        records = sheets_ws.get_all_records()
+        for i, r in enumerate(records, start=2):
+            if r.get("シートID") == sheet_id:
+                sheets_ws.delete_rows(i)
+                return True
+        return False
+    except Exception:
+        return False
+
+
+def append_log_to_manager(log_data: dict):
+    """実行ログを管理シートに追記"""
+    wb = get_manager_workbook()
+    if not wb:
+        return
+    try:
+        _, logs_ws = ensure_manager_tabs(wb)
+        logs_ws.append_row([
+            log_data.get("id", ""),
+            log_data.get("timestamp", ""),
+            log_data.get("sheet_name", ""),
+            log_data.get("sheet_id", ""),
+            log_data.get("type", "手動"),
+            log_data.get("total", 0),
+            log_data.get("success", 0),
+            log_data.get("fail", 0),
+            log_data.get("duration", ""),
+            log_data.get("status", ""),
+            log_data.get("urls", ""),
         ])
     except Exception as e:
-        # ログ失敗は致命的ではないので無視
         print(f"Log append failed: {e}")
+
+
+def get_all_logs():
+    """全実行ログを取得"""
+    wb = get_manager_workbook()
+    if not wb:
+        return []
+    try:
+        _, logs_ws = ensure_manager_tabs(wb)
+        return logs_ws.get_all_records()
+    except Exception:
+        return []
 
 
 def format_duration(seconds: float) -> str:
@@ -546,19 +643,50 @@ def fetch_x(url: str, return_raw: bool = False):
 # ═══════════════════════════════════════════════════════════
 if st.session_state.page == "fetch":
     st.markdown('<div class="page-title">📊 数値を取得する</div>', unsafe_allow_html=True)
-    st.markdown('<div class="page-subtitle">スプレッドシートの XURL 列を読み取り、数値を取得して書き戻します</div>', unsafe_allow_html=True)
+    st.markdown('<div class="page-subtitle">登録済みシートを選んで、Xポストの数値を一括取得します</div>', unsafe_allow_html=True)
+
+    # 管理シートが未設定なら案内
+    manager_ready = bool(st.secrets.get("MANAGER_SHEET_ID", ""))
 
     with st.container(border=True):
-        sheet_input = st.text_input(
-            "スプレッドシートのURLまたはID",
-            placeholder="https://docs.google.com/spreadsheets/d/xxxxxxxx/edit",
-        )
-        sheet_index = st.number_input("シート番号（1枚目=1）", min_value=1, value=1) - 1
+        if manager_ready:
+            registered = get_registered_sheets()
+        else:
+            registered = []
 
         sheet_id = ""
-        if sheet_input:
-            m = re.search(r"/spreadsheets/d/([a-zA-Z0-9-_]+)", sheet_input)
-            sheet_id = m.group(1) if m else sheet_input.strip()
+        sheet_index = 0
+
+        if registered:
+            # 登録済みシートからドロップダウン選択
+            options = ["-- シートを選択 --"] + [f"{r.get('表示名', r.get('シートID', ''))}" for r in registered]
+            selected = st.selectbox("対象シート", options, key="fetch_sheet_select")
+            if selected != "-- シートを選択 --":
+                idx = options.index(selected) - 1
+                sheet_id = registered[idx]["シートID"]
+
+            with st.expander("➕ 新しいシートで取得（登録せず一回だけ）"):
+                sheet_input = st.text_input(
+                    "スプレッドシートのURLまたはID",
+                    placeholder="https://docs.google.com/spreadsheets/d/xxxxxxxx/edit",
+                    key="fetch_url_input",
+                )
+                if sheet_input:
+                    m = re.search(r"/spreadsheets/d/([a-zA-Z0-9-_]+)", sheet_input)
+                    sheet_id = m.group(1) if m else sheet_input.strip()
+        else:
+            # 登録なし or 管理シート未設定 → URL直接入力
+            if not manager_ready:
+                st.warning("⚠️ 管理シートが未設定です。「📂 対象シート管理」から設定してください")
+            sheet_input = st.text_input(
+                "スプレッドシートのURLまたはID",
+                placeholder="https://docs.google.com/spreadsheets/d/xxxxxxxx/edit",
+            )
+            if sheet_input:
+                m = re.search(r"/spreadsheets/d/([a-zA-Z0-9-_]+)", sheet_input)
+                sheet_id = m.group(1) if m else sheet_input.strip()
+
+        sheet_index = st.number_input("シート番号（1枚目=1）", min_value=1, value=1) - 1
 
         st.markdown("<br>", unsafe_allow_html=True)
         run = st.button("▶ 取得開始", disabled=not sheet_id, type="primary", use_container_width=False)
@@ -569,16 +697,10 @@ if st.session_state.page == "fetch":
         try:
             run_start = time.time()
             with st.spinner("シートに接続中..."):
-                creds_raw = st.secrets["GCP_SERVICE_ACCOUNT"]
-                creds_info = json.loads(creds_raw) if isinstance(creds_raw, str) else dict(creds_raw)
-                creds = Credentials.from_service_account_info(
-                    creds_info,
-                    scopes=["https://www.googleapis.com/auth/spreadsheets",
-                            "https://www.googleapis.com/auth/drive.readonly"],
-                )
-                gc = gspread.authorize(creds)
+                gc = get_gspread_client()
                 workbook = gc.open_by_key(sheet_id)
                 ws = workbook.get_worksheet(sheet_index)
+                sheet_title = workbook.title
 
             # ヘッダー行を自動検出（最初の10行からXURLを探す）
             all_rows = ws.get_all_values()
@@ -665,17 +787,21 @@ if st.session_state.page == "fetch":
             else:
                 final_status = "一部失敗"
 
-            # 実行ログを保存
+            # 実行ログを管理シートに保存
             log_id = datetime.now().strftime("#%y%m%d%H%M%S")
-            append_log(workbook, {
+            urls_summary = " / ".join(r.get("URL", "") for r in results)
+            append_log_to_manager({
                 "id": log_id,
                 "timestamp": datetime.now().strftime("%Y/%m/%d %H:%M:%S"),
+                "sheet_name": sheet_title,
+                "sheet_id": sheet_id,
                 "type": "手動",
                 "total": total,
                 "success": success,
                 "fail": fail,
                 "duration": format_duration(duration),
                 "status": final_status,
+                "urls": urls_summary,
             })
 
             st.balloons()
@@ -725,146 +851,202 @@ if st.session_state.page == "fetch":
 
 
 # ═══════════════════════════════════════════════════════════
+# ページ：対象シート管理
+# ═══════════════════════════════════════════════════════════
+elif st.session_state.page == "sheets":
+    st.markdown('<div class="page-title">📂 対象シート管理</div>', unsafe_allow_html=True)
+    st.markdown('<div class="page-subtitle">よく使うスプレッドシートを登録すると、すぐに選んで取得できます</div>', unsafe_allow_html=True)
+
+    if not st.secrets.get("MANAGER_SHEET_ID", ""):
+        with st.container(border=True):
+            st.warning("⚠️ 管理用スプレッドシートがまだ設定されていません")
+            st.markdown("""
+このツールでシート登録・実行ログ機能を使うには、**管理用のスプレッドシート** を1つ用意する必要があります。
+
+#### 設定手順
+
+<span class="step-badge">1</span> 新しいGoogleスプレッドシートを作成（既存のものを使ってもOK）
+
+<span class="step-badge">2</span> そのシートを以下のメールに **編集者権限** で共有
+            """, unsafe_allow_html=True)
+            st.code("x-metrics-sheets@x-metrics-494110.iam.gserviceaccount.com", language=None)
+            st.markdown("""
+<span class="step-badge">3</span> シートのURLを開いて、`/d/` と `/edit` の間の **シートID** をコピー
+
+例: `https://docs.google.com/spreadsheets/d/`**`1AbC...XyZ`**`/edit`
+
+<span class="step-badge">4</span> Streamlit Cloudの **Settings → Secrets** に以下を追加：
+            """, unsafe_allow_html=True)
+            st.code('MANAGER_SHEET_ID = "ここにコピーしたシートIDを貼り付け"', language="toml")
+            st.markdown("<span class=\"step-badge\">5</span> Save → アプリをリロード（Ctrl + R）", unsafe_allow_html=True)
+        st.stop()
+
+    registered = get_registered_sheets()
+
+    # 登録フォーム
+    with st.container(border=True):
+        st.markdown("#### ➕ 新しいシートを登録")
+        col_url, col_name = st.columns([3, 2])
+        with col_url:
+            new_url = st.text_input("スプレッドシートのURL", placeholder="https://docs.google.com/spreadsheets/d/xxx/edit", key="reg_url")
+        with col_name:
+            new_name = st.text_input("表示名（任意）", placeholder="例: メガポリスト", key="reg_name")
+
+        if st.button("登録", type="primary", key="reg_btn"):
+            if not new_url:
+                st.warning("URLを入力してください")
+            else:
+                m = re.search(r"/spreadsheets/d/([a-zA-Z0-9-_]+)", new_url)
+                new_sid = m.group(1) if m else new_url.strip()
+                # シート名を取得（表示名が未指定なら）
+                if not new_name:
+                    try:
+                        gc = get_gspread_client()
+                        new_name = gc.open_by_key(new_sid).title
+                    except Exception:
+                        new_name = new_sid[:20]
+                if add_registered_sheet(new_sid, new_name):
+                    st.success(f"✅ 「{new_name}」を登録しました")
+                    st.rerun()
+                else:
+                    st.warning("登録に失敗しました（重複している可能性があります）")
+
+    # 登録済み一覧
+    with st.container(border=True):
+        st.markdown("#### 📋 登録済みシート一覧")
+        if not registered:
+            st.info("まだ登録されていません。上のフォームから登録してください")
+        else:
+            for r in registered:
+                sid = r.get("シートID", "")
+                name = r.get("表示名", sid)
+                regdate = r.get("登録日", "")
+                col1, col2, col3 = st.columns([3, 2, 1])
+                col1.markdown(f"**{name}**  \n<span style='color:#888;font-size:0.8rem;'>`{sid[:30]}...`</span>", unsafe_allow_html=True)
+                col2.markdown(f"<span style='color:#888;font-size:0.85rem;'>登録日: {regdate}</span>", unsafe_allow_html=True)
+                if col3.button("🗑️", key=f"del_{sid}"):
+                    if remove_registered_sheet(sid):
+                        st.success(f"「{name}」を削除しました")
+                        st.rerun()
+
+
+# ═══════════════════════════════════════════════════════════
 # ページ：実行ログ
 # ═══════════════════════════════════════════════════════════
 elif st.session_state.page == "logs":
     st.markdown('<div class="page-title">📋 実行ログ</div>', unsafe_allow_html=True)
     st.markdown('<div class="page-subtitle">過去の実行履歴を確認できます</div>', unsafe_allow_html=True)
 
-    if "last_sheet_id" not in st.session_state:
-        st.session_state.last_sheet_id = ""
-
-    log_sheet_id = st.session_state.get("last_sheet_id", "")
-
-    # まだシートが選ばれていない場合：URL入力を促す
-    if not log_sheet_id:
+    if not st.secrets.get("MANAGER_SHEET_ID", ""):
         with st.container(border=True):
-            st.info("📭 履歴を表示するには、先に「📊 数値を取得する」から実行するか、下にURLを入力してください")
-            log_input = st.text_input(
-                "スプレッドシートのURLまたはID",
-                placeholder="https://docs.google.com/spreadsheets/d/xxxxxxxx/edit",
-                key="log_sheet_input_init",
-            )
-            if log_input:
-                m = re.search(r"/spreadsheets/d/([a-zA-Z0-9-_]+)", log_input)
-                new_id = m.group(1) if m else log_input.strip()
-                if new_id:
-                    st.session_state.last_sheet_id = new_id
-                    st.rerun()
+            st.warning("⚠️ 管理用スプレッドシートが未設定のため、ログを表示できません")
+            st.info("「📂 対象シート管理」ページから設定方法を確認してください")
+        st.stop()
 
-    # シートIDがあればログを表示
-    if log_sheet_id:
-        try:
-            with st.spinner("ログを読み込み中..."):
-                creds_raw = st.secrets["GCP_SERVICE_ACCOUNT"]
-                creds_info = json.loads(creds_raw) if isinstance(creds_raw, str) else dict(creds_raw)
-                creds = Credentials.from_service_account_info(
-                    creds_info,
-                    scopes=["https://www.googleapis.com/auth/spreadsheets",
-                            "https://www.googleapis.com/auth/drive.readonly"],
-                )
-                gc = gspread.authorize(creds)
-                workbook = gc.open_by_key(log_sheet_id)
+    try:
+        with st.spinner("ログを読み込み中..."):
+            log_records = get_all_logs()
 
-                try:
-                    log_ws = workbook.worksheet(LOG_SHEET_NAME)
-                    log_records = log_ws.get_all_records()
-                    sheet_title = workbook.title
-                except gspread.exceptions.WorksheetNotFound:
-                    log_records = []
-                    sheet_title = workbook.title
+        if not log_records:
+            with st.container(border=True):
+                st.info("📭 まだ実行履歴がありません。「📊 数値を取得する」から実行すると履歴が記録されます。")
+        else:
+            # 集計サマリー
+            df = pd.DataFrame(log_records)
+            df = df.iloc[::-1].reset_index(drop=True)  # 新しい順
 
-            if not log_records:
-                with st.container(border=True):
-                    st.info(f"📭 「**{sheet_title}**」にはまだ実行履歴がありません。\n\n「📊 数値を取得する」から実行すると履歴が記録されます。")
-            else:
-                # 集計サマリー
-                df = pd.DataFrame(log_records)
-                df = df.iloc[::-1].reset_index(drop=True)  # 新しい順
+            total_runs = len(df)
+            success_runs = (df["ステータス"] == "成功").sum() if "ステータス" in df.columns else 0
+            partial_runs = (df["ステータス"] == "一部失敗").sum() if "ステータス" in df.columns else 0
+            failed_runs = (df["ステータス"] == "失敗").sum() if "ステータス" in df.columns else 0
 
-                total_runs = len(df)
-                success_runs = (df["ステータス"] == "成功").sum() if "ステータス" in df.columns else 0
-                partial_runs = (df["ステータス"] == "一部失敗").sum() if "ステータス" in df.columns else 0
-                failed_runs = (df["ステータス"] == "失敗").sum() if "ステータス" in df.columns else 0
+            with st.container(border=True):
+                cols = st.columns(4)
+                cols[0].metric("実行回数", total_runs)
+                cols[1].metric("✅ 成功", int(success_runs))
+                cols[2].metric("⚠️ 一部失敗", int(partial_runs))
+                cols[3].metric("❌ 失敗", int(failed_runs))
 
-                # シート切り替えボタン
-                col_title, col_btn = st.columns([5, 1])
-                with col_title:
-                    st.markdown(f"📄 **{sheet_title}** の履歴")
-                with col_btn:
-                    if st.button("🔄 別シート", use_container_width=True, key="switch_sheet"):
-                        st.session_state.last_sheet_id = ""
-                        st.rerun()
-
-                with st.container(border=True):
-                    cols = st.columns(4)
-                    cols[0].metric("実行回数", total_runs)
-                    cols[1].metric("✅ 成功", int(success_runs))
-                    cols[2].metric("⚠️ 一部失敗", int(partial_runs))
-                    cols[3].metric("❌ 失敗", int(failed_runs))
-
-                with st.container(border=True):
-                    # 検索＆フィルタ
-                    col_search, col_filter = st.columns([3, 2])
-                    with col_search:
-                        search_query = st.text_input(
-                            "🔍 検索",
-                            placeholder="ID・日付・件数などで絞り込み",
-                            label_visibility="collapsed",
-                            key="log_search",
-                        )
-                    with col_filter:
-                        status_filter = st.selectbox(
-                            "ステータス",
-                            ["すべて", "✅ 成功", "⚠️ 一部失敗", "❌ 失敗"],
-                            label_visibility="collapsed",
-                            key="log_filter",
-                        )
-
-                    # ステータスをアイコン付きで表示
-                    if "ステータス" in df.columns:
-                        df["ステータス"] = df["ステータス"].map({
-                            "成功": "✅ 成功",
-                            "一部失敗": "⚠️ 一部失敗",
-                            "失敗": "❌ 失敗",
-                        }).fillna(df["ステータス"])
-
-                    # フィルタ適用
-                    filtered_df = df.copy()
-                    if status_filter != "すべて":
-                        filtered_df = filtered_df[filtered_df["ステータス"] == status_filter]
-                    if search_query:
-                        q = search_query.lower()
-                        mask = filtered_df.apply(
-                            lambda row: q in " ".join(str(v) for v in row.values).lower(),
-                            axis=1,
-                        )
-                        filtered_df = filtered_df[mask]
-
-                    st.caption(f"{len(filtered_df)} / {len(df)} 件を表示")
-
-                    st.dataframe(
-                        filtered_df,
-                        use_container_width=True,
-                        hide_index=True,
-                        column_config={
-                            "ID": st.column_config.TextColumn("ID", width="small"),
-                            "実行時刻": st.column_config.TextColumn("開始時刻"),
-                            "実行種別": st.column_config.TextColumn("種別", width="small"),
-                            "対象件数": st.column_config.NumberColumn("件数", width="small"),
-                            "成功": st.column_config.NumberColumn("成功", width="small"),
-                            "失敗": st.column_config.NumberColumn("失敗", width="small"),
-                            "所要時間": st.column_config.TextColumn("所要時間", width="small"),
-                            "ステータス": st.column_config.TextColumn("ステータス"),
-                        },
+            with st.container(border=True):
+                # 検索＆フィルタ
+                col_search, col_status, col_sheet = st.columns([3, 2, 2])
+                with col_search:
+                    search_query = st.text_input(
+                        "🔍 検索",
+                        placeholder="ID・日付・URL・ユーザー名などで絞り込み",
+                        label_visibility="collapsed",
+                        key="log_search",
                     )
-        except (gspread.exceptions.SpreadsheetNotFound, PermissionError):
-            st.error("❌ スプレッドシートにアクセスできません。共有設定を確認してください")
-            if st.button("🔄 別のシートを指定", key="reset_sheet"):
-                st.session_state.last_sheet_id = ""
-                st.rerun()
-        except Exception as e:
-            st.error(f"❌ エラー: {str(e) or type(e).__name__}")
+                with col_status:
+                    status_filter = st.selectbox(
+                        "ステータス",
+                        ["すべて", "✅ 成功", "⚠️ 一部失敗", "❌ 失敗"],
+                        label_visibility="collapsed",
+                        key="log_filter",
+                    )
+                with col_sheet:
+                    sheet_options = ["すべてのシート"] + sorted(df["シート名"].unique().tolist()) if "シート名" in df.columns else ["すべてのシート"]
+                    sheet_filter = st.selectbox(
+                        "シート",
+                        sheet_options,
+                        label_visibility="collapsed",
+                        key="log_sheet_filter",
+                    )
+
+                # ステータスをアイコン付きで表示
+                if "ステータス" in df.columns:
+                    df["ステータス"] = df["ステータス"].map({
+                        "成功": "✅ 成功",
+                        "一部失敗": "⚠️ 一部失敗",
+                        "失敗": "❌ 失敗",
+                    }).fillna(df["ステータス"])
+
+                # フィルタ適用
+                filtered_df = df.copy()
+                if status_filter != "すべて":
+                    filtered_df = filtered_df[filtered_df["ステータス"] == status_filter]
+                if sheet_filter != "すべてのシート" and "シート名" in filtered_df.columns:
+                    filtered_df = filtered_df[filtered_df["シート名"] == sheet_filter]
+                if search_query:
+                    q = search_query.lower()
+                    mask = filtered_df.apply(
+                        lambda row: q in " ".join(str(v) for v in row.values).lower(),
+                        axis=1,
+                    )
+                    filtered_df = filtered_df[mask]
+
+                st.caption(f"{len(filtered_df)} / {len(df)} 件を表示")
+
+                # 表示用にURL一覧は省略表示
+                display_df = filtered_df.copy()
+                if "URL一覧" in display_df.columns:
+                    display_df["URL一覧"] = display_df["URL一覧"].apply(
+                        lambda s: (s[:50] + "...") if len(str(s)) > 50 else s
+                    )
+                if "シートID" in display_df.columns:
+                    display_df = display_df.drop(columns=["シートID"])
+
+                st.dataframe(
+                    display_df,
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "ID": st.column_config.TextColumn("ID", width="small"),
+                        "実行時刻": st.column_config.TextColumn("開始時刻"),
+                        "シート名": st.column_config.TextColumn("シート"),
+                        "種別": st.column_config.TextColumn("種別", width="small"),
+                        "件数": st.column_config.NumberColumn("件数", width="small"),
+                        "成功": st.column_config.NumberColumn("成功", width="small"),
+                        "失敗": st.column_config.NumberColumn("失敗", width="small"),
+                        "所要時間": st.column_config.TextColumn("所要時間", width="small"),
+                        "ステータス": st.column_config.TextColumn("ステータス"),
+                        "URL一覧": st.column_config.TextColumn("URL一覧", width="medium"),
+                    },
+                )
+    except (gspread.exceptions.SpreadsheetNotFound, PermissionError):
+        st.error("❌ 管理用スプレッドシートにアクセスできません。共有設定を確認してください")
+    except Exception as e:
+        st.error(f"❌ エラー: {str(e) or type(e).__name__}")
 
 
 # ═══════════════════════════════════════════════════════════
@@ -892,11 +1074,11 @@ elif st.session_state.page == "howto":
     with st.container(border=True):
         st.markdown("#### 取得手順")
         st.markdown("""
-<span class="step-badge">1</span> スプレッドシートをサービスアカウントと共有する（⚙️設定ページ参照）
+<span class="step-badge">1</span> 対象シートをサービスアカウントと共有する（⚙️設定ページ参照）
 
-<span class="step-badge">2</span>「📊 数値を取得する」ページを開く
+<span class="step-badge">2</span>「📂 対象シート管理」でシートを登録する
 
-<span class="step-badge">3</span> スプレッドシートのURLを貼り付ける
+<span class="step-badge">3</span>「📊 数値を取得する」ページで登録済みシートを選ぶ
 
 <span class="step-badge">4</span>「▶ 取得開始」をクリック
 
@@ -906,12 +1088,13 @@ elif st.session_state.page == "howto":
     with st.container(border=True):
         st.markdown("#### 実行ログについて")
         st.markdown("""
-取得を実行すると、対象スプレッドシートに **`_実行ログ`** という名前のタブが自動で作られ、実行履歴が記録されます。
+取得を実行すると、**管理シート**に履歴が自動で記録されます（対象スプレッドシートには書き込まれません）。
 
 「📋 実行ログ」ページから過去の実行結果を確認できます：
 - 📅 実行時刻 / 所要時間
 - 📊 対象件数 / 成功・失敗件数
 - ✅ ステータス（成功 / 一部失敗 / 失敗）
+- 🔍 ID・日付・URL・ユーザー名などで検索可能
         """)
 
     with st.container(border=True):
