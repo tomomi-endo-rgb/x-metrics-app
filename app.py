@@ -283,24 +283,36 @@ def get_gspread_client():
     return gspread.authorize(creds)
 
 
-@st.cache_resource(show_spinner=False)
-def _open_or_create_manager():
-    """管理シートを取得（なければサービスアカウントが自動作成）"""
+def get_manager_workbook():
+    """管理用スプレッドシートを取得（自動作成済み or 設定済み）"""
+    # 1. Secretsで指定されていればそれを使う（フォールバック手動設定）
+    sheet_id = st.secrets.get("MANAGER_SHEET_ID", "")
+    if sheet_id:
+        try:
+            gc = get_gspread_client()
+            return gc.open_by_key(sheet_id)
+        except Exception as e:
+            st.session_state["_manager_error"] = f"指定IDでのオープン失敗: {type(e).__name__}: {str(e)[:200]}"
+            return None
+
+    # 2. 自動取得を試みる
     try:
         gc = get_gspread_client()
         try:
-            return gc.open(MANAGER_SHEET_NAME)
-        except gspread.exceptions.SpreadsheetNotFound:
-            wb = gc.create(MANAGER_SHEET_NAME)
+            wb = gc.open(MANAGER_SHEET_NAME)
+            st.session_state.pop("_manager_error", None)
             return wb
+        except gspread.exceptions.SpreadsheetNotFound:
+            try:
+                wb = gc.create(MANAGER_SHEET_NAME)
+                st.session_state.pop("_manager_error", None)
+                return wb
+            except Exception as e:
+                st.session_state["_manager_error"] = f"作成失敗: {type(e).__name__}: {str(e)[:300]}"
+                return None
     except Exception as e:
-        print(f"Manager workbook error: {e}")
+        st.session_state["_manager_error"] = f"接続失敗: {type(e).__name__}: {str(e)[:300]}"
         return None
-
-
-def get_manager_workbook():
-    """管理用スプレッドシートを取得（自動作成済み）"""
-    return _open_or_create_manager()
 
 
 def ensure_manager_tabs(workbook):
@@ -863,8 +875,39 @@ elif st.session_state.page == "sheets":
 
     # 管理シートに接続できるか確認
     if not get_manager_workbook():
+        err = st.session_state.get("_manager_error", "")
         with st.container(border=True):
-            st.error("❌ 管理シートに接続できません。サービスアカウントの権限を確認してください")
+            st.error("❌ 管理シートに接続できません")
+            if err:
+                st.code(err, language=None)
+
+            # サービスアカウントが作成できない場合の対処（よくある制限）
+            if "storageQuotaExceeded" in err or "Service Accounts" in err or "quota" in err.lower():
+                st.markdown("""
+**📌 原因：サービスアカウントは独自のDrive容量を持っていないため、自動でファイルを作れません。**
+
+下記の手順で **管理用シートを1つだけ手動で作成** してください：
+                """)
+            else:
+                st.markdown("""
+#### 管理シートを手動で設定する
+                """)
+
+            st.markdown("""
+<span class="step-badge">1</span> Googleドライブで新規スプレッドシートを作成（名前は任意）
+
+<span class="step-badge">2</span> 右上「共有」→ 以下のメールに **編集者** で共有：
+            """, unsafe_allow_html=True)
+            st.code("x-metrics-sheets@x-metrics-494110.iam.gserviceaccount.com", language=None)
+            st.markdown("""
+<span class="step-badge">3</span> シートのURLから **シートID** をコピー
+
+例: `https://docs.google.com/spreadsheets/d/`**`1AbC...XyZ`**`/edit`
+
+<span class="step-badge">4</span> Streamlit Cloud → Settings → Secrets に以下を追加：
+            """, unsafe_allow_html=True)
+            st.code('MANAGER_SHEET_ID = "コピーしたシートIDを貼り付け"', language="toml")
+            st.markdown("<span class=\"step-badge\">5</span> Save → Ctrl+R でリロード", unsafe_allow_html=True)
         st.stop()
 
     registered = get_registered_sheets()
