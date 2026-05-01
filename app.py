@@ -158,6 +158,36 @@ section[data-testid="stSidebar"] .stButton > button:active {
     border: none !important;
 }
 
+/* Expander：小さめ・控えめスタイル */
+[data-testid="stExpander"] summary {
+    font-size: 0.82rem !important;
+    color: #888 !important;
+    padding: 0.4rem 0.6rem !important;
+}
+[data-testid="stExpander"] {
+    border: 1px dashed #d8d8d8 !important;
+    border-radius: 8px !important;
+    background: #fafafa !important;
+}
+[data-testid="stExpander"] summary:hover {
+    color: #555 !important;
+}
+
+/* セクション見出しサイズ */
+.stMarkdown h4,
+[data-testid="stMarkdownContainer"] h4,
+.main h4 {
+    font-size: 1rem !important;
+    color: #222 !important;
+    font-weight: 600 !important;
+    margin-top: 0.2rem !important;
+    margin-bottom: 0.6rem !important;
+}
+.stMarkdown h2, .stMarkdown h3 {
+    font-size: 1.05rem !important;
+    color: #222 !important;
+}
+
 /* メインエリアのカード */
 .metric-card {
     background: white;
@@ -738,7 +768,7 @@ if st.session_state.page == "fetch":
                 idx = options.index(selected) - 1
                 sheet_id = registered[idx]["シートID"]
 
-            with st.expander("➕ 新しいシートで取得（登録せず一回だけ）"):
+            with st.expander("新しいシートで取得（登録せず一回だけ）"):
                 sheet_input = st.text_input(
                     "スプレッドシートのURLまたはID",
                     placeholder="https://docs.google.com/spreadsheets/d/xxxxxxxx/edit",
@@ -749,7 +779,7 @@ if st.session_state.page == "fetch":
                     sheet_id = m.group(1) if m else sheet_input.strip()
         else:
             # 登録なし → URL直接入力
-            st.info("💡 「📂 対象シート管理」で登録するとドロップダウンから選べます")
+            st.info("「対象シート管理」で登録するとドロップダウンから選べます")
             sheet_input = st.text_input(
                 "スプレッドシートのURLまたはID",
                 placeholder="https://docs.google.com/spreadsheets/d/xxxxxxxx/edit",
@@ -785,7 +815,7 @@ if st.session_state.page == "fetch":
                     break
 
             if header_row_idx is None:
-                st.error("❌ 「XURL」列が見つかりません。ヘッダー行に「XURL」が含まれているか確認してください")
+                st.error("「XURL」列が見つかりません。ヘッダー行に「XURL」が含まれているか確認してください")
                 st.stop()
 
             url_col  = find_col(headers, ["XURL", "X URL", "xurl"])
@@ -794,7 +824,7 @@ if st.session_state.page == "fetch":
             save_col = find_col(headers, ["X保存", "X 保存", "xbookmark", "XBM", "xbm"])
 
             if not url_col:
-                st.error("❌ 「XURL」列が見つかりません")
+                st.error("「XURL」列が見つかりません")
                 st.write("検出されたヘッダー:", headers)
                 st.stop()
 
@@ -807,7 +837,7 @@ if st.session_state.page == "fetch":
             }
 
             with st.container(border=True):
-                st.success("✅ シート接続完了")
+                st.success("シート接続完了")
                 cols = st.columns(4)
                 for i, (k, v) in enumerate(col_map.items()):
                     with cols[i]:
@@ -823,13 +853,13 @@ if st.session_state.page == "fetch":
                 st.warning("URLが見つかりませんでした")
                 st.stop()
 
-            st.info(f"📋 {len(url_rows)} 件のURLを検出")
+            st.info(f"{len(url_rows)} 件のURLを検出")
             progress = st.progress(0)
             status = st.empty()
             results = []
 
             for idx, (row_num, url) in enumerate(url_rows):
-                status.markdown(f"⏳ `{idx + 1}/{len(url_rows)}` 取得中…  `{url[:70]}`")
+                status.markdown(f"`{idx + 1}/{len(url_rows)}` 取得中…  `{url[:70]}`")
                 metrics = fetch_x(url)
                 results.append({"行": row_num, "URL": url, **metrics})
 
@@ -919,7 +949,7 @@ if st.session_state.page == "fetch":
                 # 失敗したURLだけまとめて表示
                 if fail > 0:
                     failures = df[df["状態"] == "失敗"]
-                    with st.expander(f"⚠ 失敗した {fail} 件を確認", expanded=False):
+                    with st.expander(f"失敗した {fail} 件を確認", expanded=False):
                         for _, r in failures.iterrows():
                             st.markdown(
                                 f"- 行 **{r['行']}**: `{r['URL']}` → "
@@ -929,31 +959,31 @@ if st.session_state.page == "fetch":
 
         except (gspread.exceptions.SpreadsheetNotFound, PermissionError):
             st.error(
-                "❌ スプレッドシートにアクセスできません。\n\n"
+                "スプレッドシートにアクセスできません。\n\n"
                 "**スプレッドシートを以下のメールアドレスに「編集者」権限で共有してください：**"
             )
             st.code("x-metrics-sheets@x-metrics-494110.iam.gserviceaccount.com", language=None)
             st.markdown(
-                "👉 スプレッドシートの右上「**共有**」ボタン → メールアドレスを貼り付け → 権限を「**編集者**」にして「送信」"
+                "スプレッドシートの右上「**共有**」ボタン → メールアドレスを貼り付け → 権限を「**編集者**」にして「送信」"
             )
         except gspread.exceptions.APIError as e:
             err_text = str(e)
             if "PERMISSION_DENIED" in err_text or "403" in err_text:
                 st.error(
-                    "❌ スプレッドシートにアクセスできません。\n\n"
+                    "スプレッドシートにアクセスできません。\n\n"
                     "**スプレッドシートを以下のメールアドレスに「編集者」権限で共有してください：**"
                 )
                 st.code("x-metrics-sheets@x-metrics-494110.iam.gserviceaccount.com", language=None)
                 st.markdown(
-                    "👉 スプレッドシートの右上「**共有**」ボタン → メールアドレスを貼り付け → 権限を「**編集者**」にして「送信」"
+                    "スプレッドシートの右上「**共有**」ボタン → メールアドレスを貼り付け → 権限を「**編集者**」にして「送信」"
                 )
             else:
-                st.error(f"❌ Google Sheets APIエラー: {err_text}")
+                st.error(f"Google Sheets APIエラー: {err_text}")
         except KeyError as e:
-            st.error(f"❌ シークレット設定エラー（{e} が見つかりません）")
+            st.error(f"シークレット設定エラー（{e} が見つかりません）")
         except Exception as e:
             err_msg = str(e) or type(e).__name__
-            st.error(f"❌ エラー: {err_msg}")
+            st.error(f"エラー: {err_msg}")
 
 
 # ═══════════════════════════════════════════════════════════
@@ -967,7 +997,7 @@ elif st.session_state.page == "sheets":
     if not get_manager_workbook():
         err = st.session_state.get("_manager_error", "")
         with st.container(border=True):
-            st.error("❌ 管理シートに接続できません")
+            st.error("管理シートに接続できません")
             if err:
                 st.code(err, language=None)
 
@@ -1004,7 +1034,7 @@ elif st.session_state.page == "sheets":
 
     # 登録フォーム
     with st.container(border=True):
-        st.markdown("#### ➕ 新しいシートを登録")
+        st.markdown('<h4><span class="material-icons" style="vertical-align:-4px;font-size:1.1rem;margin-right:6px;color:#555;">add_circle</span>新しいシートを登録</h4>', unsafe_allow_html=True)
         col_url, col_name = st.columns([3, 2])
         with col_url:
             new_url = st.text_input("スプレッドシートのURL", placeholder="https://docs.google.com/spreadsheets/d/xxx/edit", key="reg_url")
@@ -1025,14 +1055,14 @@ elif st.session_state.page == "sheets":
                     except Exception:
                         new_name = new_sid[:20]
                 if add_registered_sheet(new_sid, new_name):
-                    st.success(f"✅ 「{new_name}」を登録しました")
+                    st.success(f"「{new_name}」を登録しました")
                     st.rerun()
                 else:
                     st.warning("登録に失敗しました（重複している可能性があります）")
 
     # 登録済み一覧
     with st.container(border=True):
-        st.markdown("#### 📋 登録済みシート一覧")
+        st.markdown('<h4><span class="material-icons" style="vertical-align:-4px;font-size:1.1rem;margin-right:6px;color:#555;">list_alt</span>登録済みシート一覧</h4>', unsafe_allow_html=True)
         if not registered:
             st.info("まだ登録されていません。上のフォームから登録してください")
         else:
@@ -1043,9 +1073,9 @@ elif st.session_state.page == "sheets":
                 col1, col2, col3 = st.columns([3, 2, 1])
                 col1.markdown(f"**{name}**  \n<span style='color:#888;font-size:0.8rem;'>`{sid[:30]}...`</span>", unsafe_allow_html=True)
                 col2.markdown(f"<span style='color:#888;font-size:0.85rem;'>登録日: {regdate}</span>", unsafe_allow_html=True)
-                if col3.button("🗑️", key=f"del_{sid}"):
+                if col3.button(":material/delete:", key=f"del_{sid}"):
                     if remove_registered_sheet(sid):
-                        st.success(f"「{name}」を削除しました")
+                        st.success(f"「{name}」の登録を解除しました")
                         st.rerun()
 
 
@@ -1059,7 +1089,7 @@ elif st.session_state.page == "logs":
     if not get_manager_workbook():
         err = st.session_state.get("_manager_error", "")
         with st.container(border=True):
-            st.error("❌ 管理シートに接続できません")
+            st.error("管理シートに接続できません")
             if err:
                 st.code(err, language=None)
             st.markdown("""
@@ -1083,7 +1113,7 @@ elif st.session_state.page == "logs":
 
         if not log_records:
             with st.container(border=True):
-                st.info("📭 まだ実行履歴がありません。「📊 数値を取得する」から実行すると履歴が記録されます。")
+                st.info("まだ実行履歴がありません。「数値を取得する」から実行すると履歴が記録されます。")
         else:
             # 集計サマリー
             df = pd.DataFrame(log_records)
@@ -1097,16 +1127,16 @@ elif st.session_state.page == "logs":
             with st.container(border=True):
                 cols = st.columns(4)
                 cols[0].metric("実行回数", total_runs)
-                cols[1].metric("✅ 成功", int(success_runs))
-                cols[2].metric("⚠️ 一部失敗", int(partial_runs))
-                cols[3].metric("❌ 失敗", int(failed_runs))
+                cols[1].metric(":material/check_circle: 成功", int(success_runs))
+                cols[2].metric(":material/error: 一部失敗", int(partial_runs))
+                cols[3].metric(":material/cancel: 失敗", int(failed_runs))
 
             with st.container(border=True):
                 # 検索＆フィルタ
                 col_search, col_status, col_sheet = st.columns([3, 2, 2])
                 with col_search:
                     search_query = st.text_input(
-                        "🔍 検索",
+                        "検索",
                         placeholder="ID・日付・URL・ユーザー名などで絞り込み",
                         label_visibility="collapsed",
                         key="log_search",
@@ -1114,7 +1144,7 @@ elif st.session_state.page == "logs":
                 with col_status:
                     status_filter = st.selectbox(
                         "ステータス",
-                        ["すべて", "✅ 成功", "⚠️ 一部失敗", "❌ 失敗"],
+                        ["すべて", "成功", "一部失敗", "失敗"],
                         label_visibility="collapsed",
                         key="log_filter",
                     )
@@ -1127,13 +1157,7 @@ elif st.session_state.page == "logs":
                         key="log_sheet_filter",
                     )
 
-                # ステータスをアイコン付きで表示
-                if "ステータス" in df.columns:
-                    df["ステータス"] = df["ステータス"].map({
-                        "成功": "✅ 成功",
-                        "一部失敗": "⚠️ 一部失敗",
-                        "失敗": "❌ 失敗",
-                    }).fillna(df["ステータス"])
+                # ステータス値はそのまま表示（マッピング不要）
 
                 # フィルタ適用
                 filtered_df = df.copy()
@@ -1178,9 +1202,9 @@ elif st.session_state.page == "logs":
                     },
                 )
     except (gspread.exceptions.SpreadsheetNotFound, PermissionError):
-        st.error("❌ 管理用スプレッドシートにアクセスできません。共有設定を確認してください")
+        st.error("管理用スプレッドシートにアクセスできません。共有設定を確認してください")
     except Exception as e:
-        st.error(f"❌ エラー: {str(e) or type(e).__name__}")
+        st.error(f"エラー: {str(e) or type(e).__name__}")
 
 
 # ═══════════════════════════════════════════════════════════
@@ -1197,7 +1221,7 @@ elif st.session_state.page == "howto":
 
 | 列名 | 内容 | 必須 |
 |------|------|------|
-| `XURL` | XポストのURL | ✅ 必須 |
+| `XURL` | XポストのURL | 必須 |
 | `XImp` | 再生数（インプレッション） | 任意 |
 | `Xいいね` | いいね数 | 任意 |
 | `X保存` または `XBM` | 保存（ブックマーク）数 | 任意 |
@@ -1208,15 +1232,15 @@ elif st.session_state.page == "howto":
     with st.container(border=True):
         st.markdown("#### 取得手順")
         st.markdown("""
-<span class="step-badge">1</span> 対象シートをサービスアカウントと共有する（⚙️設定ページ参照）
+<span class="step-badge">1</span> 対象シートをサービスアカウントと共有する（設定ページ参照）
 
-<span class="step-badge">2</span>「📂 対象シート管理」でシートを登録する
+<span class="step-badge">2</span>「対象シート管理」でシートを登録する
 
-<span class="step-badge">3</span>「📊 数値を取得する」ページで登録済みシートを選ぶ
+<span class="step-badge">3</span>「数値を取得する」ページで登録済みシートを選ぶ
 
-<span class="step-badge">4</span>「▶ 取得開始」をクリック
+<span class="step-badge">4</span>「取得開始」をクリック
 
-<span class="step-badge">5</span> 自動でXの数値が取得され、シートに書き込まれます ✨
+<span class="step-badge">5</span> 自動でXの数値が取得され、シートに書き込まれます
         """, unsafe_allow_html=True)
 
     with st.container(border=True):
@@ -1224,11 +1248,11 @@ elif st.session_state.page == "howto":
         st.markdown("""
 取得を実行すると、**管理シート**に履歴が自動で記録されます（対象スプレッドシートには書き込まれません）。
 
-「📋 実行ログ」ページから過去の実行結果を確認できます：
-- 📅 実行時刻 / 所要時間
-- 📊 対象件数 / 成功・失敗件数
-- ✅ ステータス（成功 / 一部失敗 / 失敗）
-- 🔍 ID・日付・URL・ユーザー名などで検索可能
+「実行ログ」ページから過去の実行結果を確認できます：
+- 実行時刻 / 所要時間
+- 対象件数 / 成功・失敗件数
+- ステータス（成功 / 一部失敗 / 失敗）
+- ID・日付・URL・ユーザー名などで検索可能
         """)
 
     with st.container(border=True):
@@ -1237,7 +1261,7 @@ elif st.session_state.page == "howto":
         with st.expander("「スプレッドシートが見つかりません」エラーが出る"):
             st.markdown("""
 サービスアカウント（`x-metrics-sheets@x-metrics-494110.iam.gserviceaccount.com`）にスプレッドシートが共有されていない可能性があります。
-⚙️設定ページの手順で共有を設定してください。
+設定ページの手順で共有を設定してください。
             """)
 
         with st.expander("「XURL列が見つかりません」エラーが出る"):
@@ -1301,7 +1325,7 @@ elif st.session_state.page == "settings":
             placeholder="https://docs.google.com/spreadsheets/d/xxxxxxxx/edit",
             key="test_sheet"
         )
-        if st.button("🔌 接続テスト", type="primary"):
+        if st.button(":material/cable: 接続テスト", type="primary"):
             if not test_input:
                 st.warning("URLを入力してください")
             else:
@@ -1319,9 +1343,9 @@ elif st.session_state.page == "settings":
                         gc = gspread.authorize(creds)
                         wb = gc.open_by_key(test_id)
                         sheets = [ws.title for ws in wb.worksheets()]
-                    st.success(f"✅ 接続成功！　シート一覧: {', '.join(sheets)}")
+                    st.success(f"接続成功　シート一覧: {', '.join(sheets)}")
                 except (gspread.exceptions.SpreadsheetNotFound, PermissionError):
-                    st.error("❌ アクセスできません。サービスアカウントに「編集者」権限で共有されているか確認してください")
+                    st.error("アクセスできません。サービスアカウントに「編集者」権限で共有されているか確認してください")
                 except Exception as e:
                     err_msg = str(e) or type(e).__name__
-                    st.error(f"❌ エラー: {err_msg}")
+                    st.error(f"エラー: {err_msg}")
