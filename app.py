@@ -967,8 +967,24 @@ elif st.session_state.page == "logs":
     st.markdown('<div class="page-subtitle">過去の実行履歴を確認できます</div>', unsafe_allow_html=True)
 
     if not get_manager_workbook():
+        err = st.session_state.get("_manager_error", "")
         with st.container(border=True):
-            st.error("❌ 管理シートに接続できません。サービスアカウントの権限を確認してください")
+            st.error("❌ 管理シートに接続できません")
+            if err:
+                st.code(err, language=None)
+            st.markdown("""
+**よくある原因：**
+- 管理シートが **サービスアカウントに共有されていない**
+- `MANAGER_SHEET_ID` が間違っている
+
+**解決方法：**
+
+<span class="step-badge">1</span> Secretsの`MANAGER_SHEET_ID`に書いた**スプレッドシート**を開く
+
+<span class="step-badge">2</span> 右上「共有」→ 以下のメールに **編集者** で共有：
+            """, unsafe_allow_html=True)
+            st.code("x-metrics-sheets@x-metrics-494110.iam.gserviceaccount.com", language=None)
+            st.markdown("<span class=\"step-badge\">3</span> アプリを Ctrl+R でリロード", unsafe_allow_html=True)
         st.stop()
 
     try:
