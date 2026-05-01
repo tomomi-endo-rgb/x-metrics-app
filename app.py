@@ -125,12 +125,25 @@ if run:
             )
             gc = gspread.authorize(creds)
             ws = gc.open_by_key(sheet_id).get_worksheet(sheet_index)
-            headers = ws.row_values(1)
+
+        # ヘッダー行を自動検出（最初の10行からXURLを探す）
+        all_rows = ws.get_all_values()
+        header_row_idx = None
+        headers = []
+        for i, row in enumerate(all_rows[:10]):
+            if any("XURL" in str(cell) or "xurl" in str(cell).lower() for cell in row):
+                header_row_idx = i
+                headers = row
+                break
+
+        if header_row_idx is None:
+            st.error("❌ 「XURL」列が見つかりません。ヘッダー行に「XURL」が含まれているか確認してください")
+            st.stop()
 
         url_col  = find_col(headers, ["XURL", "X URL", "xurl"])
-        imp_col  = find_col(headers, ["XImp", "X Imp", "Ximp", "X再生数"])
+        imp_col  = find_col(headers, ["XImp", "X Imp", "Ximp", "X再生数", "Xlmp"])
         like_col = find_col(headers, ["Xいいね", "X いいね", "xlike"])
-        save_col = find_col(headers, ["X保存", "X 保存", "xbookmark"])
+        save_col = find_col(headers, ["X保存", "X 保存", "xbookmark", "XBM", "xbm"])
 
         if not url_col:
             st.error("❌ 「XURL」列が見つかりません")
@@ -146,10 +159,9 @@ if run:
         st.success("✅ シート接続完了")
         st.info("  |  ".join(f"**{k}** → {v}列" for k, v in col_map.items()))
 
-        all_rows = ws.get_all_values()
         url_rows = [
-            (i + 2, row[url_col - 1].strip())
-            for i, row in enumerate(all_rows[1:])
+            (header_row_idx + i + 2, row[url_col - 1].strip())
+            for i, row in enumerate(all_rows[header_row_idx + 1:])
             if len(row) >= url_col and row[url_col - 1].strip()
         ]
 
