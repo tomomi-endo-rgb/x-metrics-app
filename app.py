@@ -19,13 +19,13 @@ st.set_page_config(
 )
 
 # ─── グローバルCSS ─────────────────────────────────────────
-st.markdown("""
+st.html("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..24,300..500,0..1,-25..0&display=swap');
+@import url('https://fonts.googleapis.com/icon?family=Material+Icons');
 
-/* Material Symbols スタイル */
-.material-symbols-rounded {
-    font-family: 'Material Symbols Rounded';
+/* Material Icons スタイル */
+.material-symbols-rounded, .material-icons {
+    font-family: 'Material Icons';
     font-weight: normal;
     font-style: normal;
     font-size: inherit;
@@ -39,7 +39,6 @@ st.markdown("""
     -webkit-font-feature-settings: 'liga';
     -webkit-font-smoothing: antialiased;
     vertical-align: -0.15em;
-    font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
 }
 
 /* 上部の右側ボタン群だけ非表示（サイドバー開閉ボタンは残す） */
@@ -226,7 +225,7 @@ hr { border: none; border-top: 1px solid #eeeeee; margin: 1rem 0; }
     margin: 0 auto;
 }
 </style>
-""", unsafe_allow_html=True)
+""")
 
 
 # ─── 認証（簡易パスワード） ────────────────────────────────
