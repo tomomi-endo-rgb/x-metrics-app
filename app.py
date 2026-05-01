@@ -15,11 +15,19 @@ st.set_page_config(
     page_title="X Metrics",
     page_icon="𝕏",
     layout="wide",
+    menu_items={"Get Help": None, "Report a bug": None, "About": None},
 )
 
 # ─── グローバルCSS ─────────────────────────────────────────
 st.markdown("""
 <style>
+/* 上部のツールバー（Clear caches等のメニュー）を非表示 */
+[data-testid="stToolbar"] { display: none !important; }
+[data-testid="stDecoration"] { display: none !important; }
+header[data-testid="stHeader"] { background: transparent !important; height: 0 !important; }
+#MainMenu { visibility: hidden !important; }
+footer { visibility: hidden !important; }
+
 /* 全体背景 */
 [data-testid="stAppViewContainer"] {
     background: #f7f7f7;
@@ -61,6 +69,10 @@ section[data-testid="stSidebar"] .stButton > button {
     font-weight: 400 !important;
     box-shadow: none !important;
     justify-content: flex-start !important;
+    display: flex !important;
+    align-items: center !important;
+    gap: 0.6rem !important;
+    letter-spacing: 0.02em !important;
 }
 
 /* サイドバーのボタン内のテキスト */
@@ -69,6 +81,15 @@ section[data-testid="stSidebar"] .stButton > button span,
 section[data-testid="stSidebar"] .stButton > button div {
     color: #cccccc !important;
     text-align: left !important;
+    width: 100% !important;
+}
+
+/* Material アイコンのスタイル */
+section[data-testid="stSidebar"] .stButton > button .material-symbols-rounded,
+section[data-testid="stSidebar"] .stButton > button [class*="material-symbols"] {
+    font-size: 1.1rem !important;
+    color: inherit !important;
+    margin-right: 0.2rem !important;
 }
 
 /* hover状態 */
@@ -221,25 +242,30 @@ with st.sidebar:
 
     st.markdown("<div style='border-top:1px solid #333; margin:0 -1rem 1rem -1rem;'></div>", unsafe_allow_html=True)
 
-    # ナビゲーション定義
+    # ナビゲーション定義（Material Icons）
     nav_items = [
-        ("fetch",    "📊  数値を取得する"),
-        ("sheets",   "📂  対象シート管理"),
-        ("logs",     "📋  実行ログ"),
-        ("howto",    "📖  使い方"),
-        ("settings", "⚙️  設定・シート共有"),
+        ("fetch",    ":material/query_stats:", "数値を取得する"),
+        ("sheets",   ":material/folder:",      "対象シート管理"),
+        ("logs",     ":material/history:",     "実行ログ"),
+        ("howto",    ":material/help_outline:","使い方"),
+        ("settings", ":material/settings:",    "設定・シート共有"),
     ]
 
-    for key, label in nav_items:
+    for key, icon, label in nav_items:
         btn_type = "primary" if st.session_state.page == key else "secondary"
-        if st.button(label, key=f"nav_{key}", use_container_width=True, type=btn_type):
+        if st.button(
+            f"{icon} {label}",
+            key=f"nav_{key}",
+            use_container_width=True,
+            type=btn_type,
+        ):
             st.session_state.page = key
             st.rerun()
 
     # 下部：ログアウト
     st.markdown("<div style='position:fixed; bottom:2rem; width:186px;'>", unsafe_allow_html=True)
     st.markdown("<div style='border-top:1px solid #333; margin-bottom:0.8rem;'></div>", unsafe_allow_html=True)
-    if st.button("🚪  ログアウト", use_container_width=True):
+    if st.button(":material/logout: ログアウト", use_container_width=True):
         st.session_state.authenticated = False
         st.rerun()
     st.markdown("</div>", unsafe_allow_html=True)
@@ -819,8 +845,6 @@ if st.session_state.page == "fetch":
                 "status": final_status,
                 "urls": urls_summary,
             })
-
-            st.balloons()
 
             with st.container(border=True):
                 emoji = "🎉" if final_status == "成功" else ("⚠️" if final_status == "一部失敗" else "❌")
