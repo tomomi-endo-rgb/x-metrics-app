@@ -259,14 +259,42 @@ def find_col(headers: list, candidates: list):
     return None
 
 
+# X (Twitter) Web Clientが内部で使う公開Bearer Token
+PUBLIC_BEARER = (
+    "AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs"
+    "%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA"
+)
+
+UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/120.0.0.0 Safari/537.36"
+)
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def _get_guest_token() -> str:
+    """ゲストトークンを取得（10分キャッシュ）"""
+    try:
+        resp = httpx.post(
+            "https://api.x.com/1.1/guest/activate.json",
+            headers={
+                "Authorization": f"Bearer {PUBLIC_BEARER}",
+                "User-Agent": UA,
+            },
+            timeout=10,
+        )
+        if resp.status_code == 200:
+            return resp.json().get("guest_token", "")
+    except Exception:
+        pass
+    return ""
+
+
 def _syndication_token(tweet_id: str) -> str:
-    """Twitter Syndication API用のtokenを生成
-    JS: ((Number(id) / 1e15) * Math.PI).toString(36).replace(/(0+|\.)/g, '')
-    """
+    """Syndication API用のtokenを生成（フォールバック用）"""
     n = (int(tweet_id) / 1e15) * math.pi
     chars = "0123456789abcdefghijklmnopqrstuvwxyz"
-
-    # 整数部
     int_part = int(n)
     int_str = ""
     if int_part == 0:
@@ -275,8 +303,6 @@ def _syndication_token(tweet_id: str) -> str:
         while int_part > 0:
             int_part, r = divmod(int_part, 36)
             int_str = chars[r] + int_str
-
-    # 小数部（精度15桁）
     frac = n - int(n)
     frac_str = ""
     for _ in range(15):
@@ -286,84 +312,160 @@ def _syndication_token(tweet_id: str) -> str:
         frac -= digit
         if frac == 0:
             break
-
     full = int_str + ("." + frac_str if frac_str else "")
     return re.sub(r"(0+|\.)", "", full)
 
 
-def _extract_views(data: dict):
-    """様々なフィールドから再生数を取得"""
-    # パターン1: views.count
-    if isinstance(data.get("views"), dict):
-        v = data["views"].get("count")
-        if v is not None:
-            return v
-    # パターン2: view_count_info.count
-    if isinstance(data.get("view_count_info"), dict):
-        v = data["view_count_info"].get("count")
-        if v is not None:
-            return v
-    # パターン3: ext_views.count
-    if isinstance(data.get("ext_views"), dict):
-        v = data["ext_views"].get("count")
-        if v is not None:
-            return v
-    # パターン4: 直接 view_count
-    if data.get("view_count") is not None:
-        return data["view_count"]
-    # パターン5: video_view_count
-    if data.get("video_view_count") is not None:
-        return data["video_view_count"]
-    return "-"
+def _fetch_via_graphql(tweet_id: str):
+    """GraphQL APIで取得（再生数・いいね・保存すべて取れる可能性）"""
+    guest_token = _get_guest_token()
+    if not guest_token:
+        return None, None
+
+    variables = {
+        "tweetId": tweet_id,
+        "withCommunity": False,
+        "includePromotedContent": False,
+        "withVoice": False,
+    }
+    features = {
+        "creator_subscriptions_tweet_preview_api_enabled": True,
+        "communities_web_enable_tweet_community_results_fetch": True,
+        "c9s_tweet_anatomy_moderator_badge_enabled": True,
+        "articles_preview_enabled": True,
+        "tweetypie_unmention_optimization_enabled": True,
+        "responsive_web_edit_tweet_api_enabled": True,
+        "graphql_is_translatable_rweb_tweet_is_translatable_enabled": True,
+        "view_counts_everywhere_api_enabled": True,
+        "longform_notetweets_consumption_enabled": True,
+        "responsive_web_twitter_article_tweet_consumption_enabled": True,
+        "tweet_awards_web_tipping_enabled": False,
+        "creator_subscriptions_quote_tweet_preview_enabled": False,
+        "freedom_of_speech_not_reach_fetch_enabled": True,
+        "standardized_nudges_misinfo": True,
+        "tweet_with_visibility_results_prefer_gql_limited_actions_policy_enabled": True,
+        "rweb_video_timestamps_enabled": True,
+        "longform_notetweets_rich_text_read_enabled": True,
+        "longform_notetweets_inline_media_enabled": True,
+        "responsive_web_graphql_exclude_directive_enabled": True,
+        "verified_phone_label_enabled": False,
+        "responsive_web_graphql_skip_user_profile_image_extensions_enabled": False,
+        "responsive_web_graphql_timeline_navigation_enabled": True,
+        "responsive_web_enhance_cards_enabled": False,
+        "rweb_tipjar_consumption_enabled": True,
+        "profile_label_improvements_pcf_label_in_post_enabled": False,
+    }
+    field_toggles = {"withArticleRichContentState": False, "withAuxiliaryUserLabels": False}
+
+    # 複数のクエリIDを試す（X側で変わるため）
+    query_ids = [
+        "0hWvDhmW8YQ-S_ib3azIrw",
+        "2ICDjqPd81tulZcYrtpTuQ",
+        "8mPfHBetXXg2bDIDUjWAGw",
+        "yV3UMNEaezEcVGGJ4DuYAA",
+    ]
+
+    for qid in query_ids:
+        try:
+            resp = httpx.get(
+                f"https://api.x.com/graphql/{qid}/TweetResultByRestId",
+                params={
+                    "variables": json.dumps(variables),
+                    "features": json.dumps(features),
+                    "fieldToggles": json.dumps(field_toggles),
+                },
+                headers={
+                    "Authorization": f"Bearer {PUBLIC_BEARER}",
+                    "x-guest-token": guest_token,
+                    "User-Agent": UA,
+                    "Referer": "https://x.com/",
+                    "Origin": "https://x.com",
+                    "x-twitter-active-user": "yes",
+                    "x-twitter-client-language": "ja",
+                    "Accept": "*/*",
+                    "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
+                },
+                timeout=15,
+                follow_redirects=True,
+            )
+
+            if resp.status_code == 200:
+                data = resp.json()
+                tweet_result = data.get("data", {}).get("tweetResult", {})
+                tweet = tweet_result.get("result", {}) if isinstance(tweet_result, dict) else {}
+
+                # __typename が TweetTombstone の場合はNG
+                if tweet.get("__typename") == "TweetTombstone":
+                    return None, data
+
+                legacy = tweet.get("legacy", {})
+                views = tweet.get("views", {})
+
+                view_count = "-"
+                if isinstance(views, dict):
+                    view_count = views.get("count", "-") or "-"
+
+                result = {
+                    "再生数": view_count,
+                    "いいね": legacy.get("favorite_count", "-"),
+                    "保存": legacy.get("bookmark_count", "-"),
+                }
+                return result, data
+        except Exception:
+            continue
+
+    return None, None
+
+
+def _fetch_via_syndication(tweet_id: str):
+    """Syndication API（フォールバック）"""
+    try:
+        token = _syndication_token(tweet_id)
+        resp = httpx.get(
+            "https://cdn.syndication.twimg.com/tweet-result",
+            params={"id": tweet_id, "token": token, "lang": "ja"},
+            headers={
+                "User-Agent": UA,
+                "Accept": "application/json",
+                "Referer": "https://platform.twitter.com/",
+            },
+            timeout=15,
+            follow_redirects=True,
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            return {
+                "再生数": "-",
+                "いいね": data.get("favorite_count", "-"),
+                "保存": "-",
+            }, data
+        elif resp.status_code == 404:
+            return {"再生数": "削除済み", "いいね": "-", "保存": "-"}, None
+    except Exception:
+        pass
+    return None, None
 
 
 def fetch_x(url: str, return_raw: bool = False):
-    """X(Twitter)の公開Syndication APIを使って数値を取得（Token不要）"""
+    """X(Twitter)の数値を取得（裏API → Syndicationの順にフォールバック）"""
     try:
         m = re.search(r"/status/(\d+)", url)
         if not m:
             result = {"再生数": "URL不正", "いいね": "-", "保存": "-"}
             return (result, None) if return_raw else result
         tweet_id = m.group(1)
-        token = _syndication_token(tweet_id)
 
-        resp = httpx.get(
-            "https://cdn.syndication.twimg.com/tweet-result",
-            params={
-                "id": tweet_id,
-                "token": token,
-                "lang": "ja",
-                "features": "tfw_timeline_list:;tfw_follower_count_sunset:true;"
-                            "tfw_tweet_edit_backend:on;tfw_refsrc_session:on;"
-                            "tfw_show_business_verified_badge:on;"
-                            "tfw_duplicate_scribes_to_settings:on;"
-                            "tfw_show_blue_verified_badge:on;"
-                            "tfw_legacy_timeline_sunset:true;"
-                            "tfw_tweet_edit_frontend:on",
-            },
-            headers={
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                              "AppleWebKit/537.36 (KHTML, like Gecko) "
-                              "Chrome/120.0.0.0 Safari/537.36",
-                "Accept": "application/json",
-                "Referer": "https://platform.twitter.com/",
-            },
-            timeout=20,
-            follow_redirects=True,
-        )
+        # 1. GraphQL API（裏API）で取得を試みる
+        result, raw = _fetch_via_graphql(tweet_id)
+        if result and result.get("いいね") not in ("-", None):
+            return (result, raw) if return_raw else result
 
-        if resp.status_code == 200:
-            data = resp.json()
-            result = {
-                "再生数": _extract_views(data),
-                "いいね": data.get("favorite_count", "-"),
-                "保存": data.get("bookmark_count", "-"),
-            }
-            return (result, data) if return_raw else result
-        elif resp.status_code == 404:
-            result = {"再生数": "削除済み", "いいね": "-", "保存": "-"}
-            return (result, None) if return_raw else result
-        result = {"再生数": f"取得失敗 ({resp.status_code})", "いいね": "-", "保存": "-"}
+        # 2. フォールバック: Syndication API（いいねだけ取れる）
+        result2, raw2 = _fetch_via_syndication(tweet_id)
+        if result2:
+            return (result2, raw2) if return_raw else result2
+
+        result = {"再生数": "取得失敗", "いいね": "-", "保存": "-"}
         return (result, None) if return_raw else result
     except Exception as e:
         result = {"再生数": "エラー", "いいね": "-", "保存": str(e)[:40]}
