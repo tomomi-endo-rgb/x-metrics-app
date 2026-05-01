@@ -5,8 +5,9 @@ import httpx
 import re
 import json
 import math
+import time
 import traceback
-from datetime import date
+from datetime import date, datetime
 import pandas as pd
 
 # ─── ページ設定 ────────────────────────────────────────────
@@ -223,6 +224,7 @@ with st.sidebar:
     # ナビゲーション定義
     nav_items = [
         ("fetch",    "📊  数値を取得する"),
+        ("logs",     "📋  実行ログ"),
         ("howto",    "📖  使い方"),
         ("settings", "⚙️  設定・シート共有"),
     ]
@@ -257,6 +259,73 @@ def find_col(headers: list, candidates: list):
             if h.strip() == name:
                 return i + 1
     return None
+
+
+LOG_SHEET_NAME = "_実行ログ"
+LOG_HEADERS = ["ID", "実行時刻", "実行種別", "対象件数", "成功", "失敗", "所要時間", "ステータス"]
+
+
+def get_or_create_log_sheet(workbook):
+    """ログ用シートを取得（なければ作成）"""
+    try:
+        log_ws = workbook.worksheet(LOG_SHEET_NAME)
+        # ヘッダー確認
+        first_row = log_ws.row_values(1)
+        if not first_row or first_row != LOG_HEADERS:
+            log_ws.clear()
+            log_ws.append_row(LOG_HEADERS)
+        return log_ws
+    except gspread.exceptions.WorksheetNotFound:
+        log_ws = workbook.add_worksheet(title=LOG_SHEET_NAME, rows=1000, cols=10)
+        log_ws.append_row(LOG_HEADERS)
+        # ヘッダー行を太字に
+        try:
+            log_ws.format("A1:H1", {"textFormat": {"bold": True}})
+        except Exception:
+            pass
+        return log_ws
+
+
+def append_log(workbook, log_data: dict):
+    """実行ログを追記"""
+    try:
+        log_ws = get_or_create_log_sheet(workbook)
+        log_ws.append_row([
+            log_data["id"],
+            log_data["timestamp"],
+            log_data["type"],
+            log_data["total"],
+            log_data["success"],
+            log_data["fail"],
+            log_data["duration"],
+            log_data["status"],
+        ])
+    except Exception as e:
+        # ログ失敗は致命的ではないので無視
+        print(f"Log append failed: {e}")
+
+
+def format_duration(seconds: float) -> str:
+    """秒数を「1分23秒」のような形式に"""
+    seconds = int(seconds)
+    if seconds < 60:
+        return f"{seconds}秒"
+    m, s = divmod(seconds, 60)
+    if m < 60:
+        return f"{m}分{s}秒"
+    h, m = divmod(m, 60)
+    return f"{h}時間{m}分{s}秒"
+
+
+def is_success_value(val) -> bool:
+    """取得結果が成功値かどうか判定"""
+    if val is None:
+        return False
+    s = str(val).strip()
+    if s in ("-", "", "0"):
+        return False
+    error_keywords = ["エラー", "取得失敗", "削除済み", "URL不正", "Token未設定", "API Error"]
+    return not any(k in s for k in error_keywords)
 
 
 # X (Twitter) Web Clientが内部で使う公開Bearer Token
@@ -495,7 +564,10 @@ if st.session_state.page == "fetch":
         run = st.button("▶ 取得開始", disabled=not sheet_id, type="primary", use_container_width=False)
 
     if run:
+        # 後でログページから参照できるよう保存
+        st.session_state.last_sheet_id = sheet_id
         try:
+            run_start = time.time()
             with st.spinner("シートに接続中..."):
                 creds_raw = st.secrets["GCP_SERVICE_ACCOUNT"]
                 creds_info = json.loads(creds_raw) if isinstance(creds_raw, str) else dict(creds_raw)
@@ -505,7 +577,8 @@ if st.session_state.page == "fetch":
                             "https://www.googleapis.com/auth/drive.readonly"],
                 )
                 gc = gspread.authorize(creds)
-                ws = gc.open_by_key(sheet_id).get_worksheet(sheet_index)
+                workbook = gc.open_by_key(sheet_id)
+                ws = workbook.get_worksheet(sheet_index)
 
             # ヘッダー行を自動検出（最初の10行からXURLを探す）
             all_rows = ws.get_all_values()
@@ -579,10 +652,46 @@ if st.session_state.page == "fetch":
                 progress.progress((idx + 1) / len(url_rows))
 
             status.empty()
+            duration = time.time() - run_start
+
+            # 成功/失敗カウント
+            total = len(results)
+            success = sum(1 for r in results if is_success_value(r.get("いいね")))
+            fail = total - success
+            if fail == 0:
+                final_status = "成功"
+            elif success == 0:
+                final_status = "失敗"
+            else:
+                final_status = "一部失敗"
+
+            # 実行ログを保存
+            log_id = datetime.now().strftime("#%y%m%d%H%M%S")
+            append_log(workbook, {
+                "id": log_id,
+                "timestamp": datetime.now().strftime("%Y/%m/%d %H:%M:%S"),
+                "type": "手動",
+                "total": total,
+                "success": success,
+                "fail": fail,
+                "duration": format_duration(duration),
+                "status": final_status,
+            })
+
             st.balloons()
 
             with st.container(border=True):
-                st.success(f"🎉 完了！ {len(url_rows)} 件をシートに書き込みました（{date.today()}）")
+                emoji = "🎉" if final_status == "成功" else ("⚠️" if final_status == "一部失敗" else "❌")
+                msg = f"{emoji} 完了！ {success}/{total} 件成功"
+                if fail > 0:
+                    msg += f"（{fail} 件失敗）"
+                msg += f" ・ 所要時間: {format_duration(duration)}"
+                if final_status == "成功":
+                    st.success(msg)
+                elif final_status == "一部失敗":
+                    st.warning(msg)
+                else:
+                    st.error(msg)
                 df = pd.DataFrame(results)
                 st.dataframe(df, use_container_width=True, hide_index=True)
 
@@ -613,6 +722,103 @@ if st.session_state.page == "fetch":
         except Exception as e:
             err_msg = str(e) or type(e).__name__
             st.error(f"❌ エラー: {err_msg}")
+
+
+# ═══════════════════════════════════════════════════════════
+# ページ：実行ログ
+# ═══════════════════════════════════════════════════════════
+elif st.session_state.page == "logs":
+    st.markdown('<div class="page-title">📋 実行ログ</div>', unsafe_allow_html=True)
+    st.markdown('<div class="page-subtitle">過去の実行履歴を確認できます</div>', unsafe_allow_html=True)
+
+    if "last_sheet_id" not in st.session_state:
+        st.session_state.last_sheet_id = ""
+
+    with st.container(border=True):
+        log_input = st.text_input(
+            "スプレッドシートのURLまたはID",
+            value=st.session_state.get("last_sheet_id", ""),
+            placeholder="https://docs.google.com/spreadsheets/d/xxxxxxxx/edit",
+            key="log_sheet_input",
+        )
+
+        log_sheet_id = ""
+        if log_input:
+            m = re.search(r"/spreadsheets/d/([a-zA-Z0-9-_]+)", log_input)
+            log_sheet_id = m.group(1) if m else log_input.strip()
+
+    if log_sheet_id:
+        try:
+            with st.spinner("ログを読み込み中..."):
+                creds_raw = st.secrets["GCP_SERVICE_ACCOUNT"]
+                creds_info = json.loads(creds_raw) if isinstance(creds_raw, str) else dict(creds_raw)
+                creds = Credentials.from_service_account_info(
+                    creds_info,
+                    scopes=["https://www.googleapis.com/auth/spreadsheets",
+                            "https://www.googleapis.com/auth/drive.readonly"],
+                )
+                gc = gspread.authorize(creds)
+                workbook = gc.open_by_key(log_sheet_id)
+
+                try:
+                    log_ws = workbook.worksheet(LOG_SHEET_NAME)
+                    log_records = log_ws.get_all_records()
+                except gspread.exceptions.WorksheetNotFound:
+                    log_records = []
+
+            if not log_records:
+                with st.container(border=True):
+                    st.info("📭 まだ実行履歴がありません。「📊 数値を取得する」から実行すると履歴が記録されます。")
+            else:
+                # 集計サマリー
+                df = pd.DataFrame(log_records)
+                df = df.iloc[::-1].reset_index(drop=True)  # 新しい順
+
+                total_runs = len(df)
+                success_runs = (df["ステータス"] == "成功").sum() if "ステータス" in df.columns else 0
+                partial_runs = (df["ステータス"] == "一部失敗").sum() if "ステータス" in df.columns else 0
+                failed_runs = (df["ステータス"] == "失敗").sum() if "ステータス" in df.columns else 0
+
+                with st.container(border=True):
+                    cols = st.columns(4)
+                    cols[0].metric("実行回数", total_runs)
+                    cols[1].metric("✅ 成功", int(success_runs))
+                    cols[2].metric("⚠️ 一部失敗", int(partial_runs))
+                    cols[3].metric("❌ 失敗", int(failed_runs))
+
+                with st.container(border=True):
+                    st.markdown("#### 実行履歴一覧")
+
+                    # ステータスをアイコン付きで表示
+                    if "ステータス" in df.columns:
+                        df["ステータス"] = df["ステータス"].map({
+                            "成功": "✅ 成功",
+                            "一部失敗": "⚠️ 一部失敗",
+                            "失敗": "❌ 失敗",
+                        }).fillna(df["ステータス"])
+
+                    st.dataframe(
+                        df,
+                        use_container_width=True,
+                        hide_index=True,
+                        column_config={
+                            "ID": st.column_config.TextColumn("ID", width="small"),
+                            "実行時刻": st.column_config.TextColumn("開始時刻"),
+                            "実行種別": st.column_config.TextColumn("種別", width="small"),
+                            "対象件数": st.column_config.NumberColumn("件数", width="small"),
+                            "成功": st.column_config.NumberColumn("成功", width="small"),
+                            "失敗": st.column_config.NumberColumn("失敗", width="small"),
+                            "所要時間": st.column_config.TextColumn("所要時間", width="small"),
+                            "ステータス": st.column_config.TextColumn("ステータス"),
+                        },
+                    )
+        except (gspread.exceptions.SpreadsheetNotFound, PermissionError):
+            st.error("❌ スプレッドシートにアクセスできません。共有設定を確認してください")
+        except Exception as e:
+            st.error(f"❌ エラー: {str(e) or type(e).__name__}")
+    else:
+        with st.container(border=True):
+            st.info("👆 上にスプレッドシートのURLを入力すると、そのシートの実行履歴が表示されます")
 
 
 # ═══════════════════════════════════════════════════════════
@@ -650,6 +856,17 @@ elif st.session_state.page == "howto":
 
 <span class="step-badge">5</span> 自動でXの数値が取得され、シートに書き込まれます ✨
         """, unsafe_allow_html=True)
+
+    with st.container(border=True):
+        st.markdown("#### 実行ログについて")
+        st.markdown("""
+取得を実行すると、対象スプレッドシートに **`_実行ログ`** という名前のタブが自動で作られ、実行履歴が記録されます。
+
+「📋 実行ログ」ページから過去の実行結果を確認できます：
+- 📅 実行時刻 / 所要時間
+- 📊 対象件数 / 成功・失敗件数
+- ✅ ステータス（成功 / 一部失敗 / 失敗）
+        """)
 
     with st.container(border=True):
         st.markdown("#### よくある質問")
