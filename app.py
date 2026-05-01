@@ -23,43 +23,85 @@ st.markdown("""
 }
 
 /* サイドバー背景 */
-[data-testid="stSidebar"] {
+section[data-testid="stSidebar"] {
     background: #111111 !important;
-    min-width: 220px !important;
-    max-width: 220px !important;
+    min-width: 230px !important;
+    max-width: 230px !important;
 }
-[data-testid="stSidebar"] > div:first-child {
-    padding-top: 2rem;
+section[data-testid="stSidebar"] > div {
+    background: #111111 !important;
+    padding-top: 1.5rem;
 }
 
-/* サイドバー内のテキスト */
-[data-testid="stSidebar"] * {
+/* サイドバー内の通常テキスト（ボタン以外） */
+section[data-testid="stSidebar"] p,
+section[data-testid="stSidebar"] span,
+section[data-testid="stSidebar"] div,
+section[data-testid="stSidebar"] label {
     color: #ffffff !important;
 }
 
-/* ナビボタンのスタイル */
-div[data-testid="stSidebar"] .stButton > button {
-    width: 100%;
+/* サイドバーのボタンコンテナ */
+section[data-testid="stSidebar"] div[data-testid="stButton"] > button,
+section[data-testid="stSidebar"] button[data-testid="baseButton-secondary"],
+section[data-testid="stSidebar"] button[data-testid="baseButton-primary"],
+section[data-testid="stSidebar"] .stButton > button {
+    width: 100% !important;
     text-align: left !important;
+    background-color: transparent !important;
     background: transparent !important;
     border: none !important;
-    border-radius: 10px !important;
-    padding: 0.6rem 1rem !important;
-    font-size: 0.9rem !important;
-    color: #aaaaaa !important;
+    border-radius: 8px !important;
+    padding: 0.55rem 0.9rem !important;
+    font-size: 0.88rem !important;
+    color: #cccccc !important;
     font-weight: 400 !important;
-    transition: all 0.2s;
+    box-shadow: none !important;
+    justify-content: flex-start !important;
 }
-div[data-testid="stSidebar"] .stButton > button:hover {
-    background: rgba(255,255,255,0.1) !important;
+
+/* サイドバーのボタン内のテキスト */
+section[data-testid="stSidebar"] .stButton > button p,
+section[data-testid="stSidebar"] .stButton > button span,
+section[data-testid="stSidebar"] .stButton > button div {
+    color: #cccccc !important;
+    text-align: left !important;
+}
+
+/* hover状態 */
+section[data-testid="stSidebar"] .stButton > button:hover {
+    background-color: rgba(255,255,255,0.08) !important;
+    background: rgba(255,255,255,0.08) !important;
+    color: #ffffff !important;
+    border: none !important;
+}
+section[data-testid="stSidebar"] .stButton > button:hover p,
+section[data-testid="stSidebar"] .stButton > button:hover span,
+section[data-testid="stSidebar"] .stButton > button:hover div {
     color: #ffffff !important;
 }
 
-/* アクティブなナビボタン */
-div[data-testid="stSidebar"] .stButton > button[kind="primary"] {
+/* アクティブ（primary）状態 */
+section[data-testid="stSidebar"] .stButton > button[kind="primary"] {
+    background-color: rgba(255,255,255,0.15) !important;
     background: rgba(255,255,255,0.15) !important;
     color: #ffffff !important;
     font-weight: 600 !important;
+    border: none !important;
+}
+section[data-testid="stSidebar"] .stButton > button[kind="primary"] p,
+section[data-testid="stSidebar"] .stButton > button[kind="primary"] span,
+section[data-testid="stSidebar"] .stButton > button[kind="primary"] div {
+    color: #ffffff !important;
+    font-weight: 600 !important;
+}
+
+/* focus時のアウトラインを消す */
+section[data-testid="stSidebar"] .stButton > button:focus,
+section[data-testid="stSidebar"] .stButton > button:active {
+    outline: none !important;
+    box-shadow: none !important;
+    border: none !important;
 }
 
 /* メインエリアのカード */
@@ -251,15 +293,11 @@ if st.session_state.page == "fetch":
     with st.container():
         st.markdown('<div class="metric-card">', unsafe_allow_html=True)
 
-        col_a, col_b = st.columns([3, 1])
-        with col_a:
-            sheet_input = st.text_input(
-                "スプレッドシートのURLまたはID",
-                placeholder="https://docs.google.com/spreadsheets/d/xxxxxxxx/edit",
-                label_visibility="visible",
-            )
-        with col_b:
-            sheet_index = st.number_input("シート番号（1枚目=1）", min_value=1, value=1) - 1
+        sheet_input = st.text_input(
+            "スプレッドシートのURLまたはID",
+            placeholder="https://docs.google.com/spreadsheets/d/xxxxxxxx/edit",
+        )
+        sheet_index = st.number_input("シート番号（1枚目=1）", min_value=1, value=1) - 1
 
         sheet_id = ""
         if sheet_input:
