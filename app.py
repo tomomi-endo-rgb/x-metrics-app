@@ -4,6 +4,7 @@ from google.oauth2.service_account import Credentials
 import httpx
 import re
 import json
+import traceback
 from datetime import date
 import pandas as pd
 
@@ -290,9 +291,7 @@ if st.session_state.page == "fetch":
     st.markdown('<div class="page-title">📊 数値を取得する</div>', unsafe_allow_html=True)
     st.markdown('<div class="page-subtitle">スプレッドシートの XURL 列を読み取り、数値を取得して書き戻します</div>', unsafe_allow_html=True)
 
-    with st.container():
-        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
-
+    with st.container(border=True):
         sheet_input = st.text_input(
             "スプレッドシートのURLまたはID",
             placeholder="https://docs.google.com/spreadsheets/d/xxxxxxxx/edit",
@@ -306,7 +305,6 @@ if st.session_state.page == "fetch":
 
         st.markdown("<br>", unsafe_allow_html=True)
         run = st.button("▶ 取得開始", disabled=not sheet_id, type="primary", use_container_width=False)
-        st.markdown('</div>', unsafe_allow_html=True)
 
     if run:
         try:
@@ -353,14 +351,12 @@ if st.session_state.page == "fetch":
                 "X保存": col_letter(save_col) if save_col else "（なし）",
             }
 
-            with st.container():
-                st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+            with st.container(border=True):
                 st.success("✅ シート接続完了")
                 cols = st.columns(4)
                 for i, (k, v) in enumerate(col_map.items()):
                     with cols[i]:
                         st.metric(label=k, value=f"{v}列")
-                st.markdown('</div>', unsafe_allow_html=True)
 
             url_rows = [
                 (header_row_idx + i + 2, row[url_col - 1].strip())
@@ -397,19 +393,24 @@ if st.session_state.page == "fetch":
             status.empty()
             st.balloons()
 
-            with st.container():
-                st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+            with st.container(border=True):
                 st.success(f"🎉 完了！ {len(url_rows)} 件をシートに書き込みました（{date.today()}）")
                 df = pd.DataFrame(results)
                 st.dataframe(df, use_container_width=True, hide_index=True)
-                st.markdown('</div>', unsafe_allow_html=True)
 
         except gspread.exceptions.SpreadsheetNotFound:
-            st.error("スプレッドシートが見つかりません。サービスアカウントへの共有設定を確認してください（⚙️設定ページ参照）")
+            st.error("❌ スプレッドシートが見つかりません。サービスアカウントへの共有設定を確認してください（⚙️設定ページ参照）")
+        except gspread.exceptions.APIError as e:
+            st.error(f"❌ Google Sheets APIエラー: {e}")
+            with st.expander("詳細"):
+                st.code(traceback.format_exc())
         except KeyError as e:
-            st.error(f"シークレット設定エラー: {e}")
+            st.error(f"❌ シークレット設定エラー（{e} が見つかりません）")
         except Exception as e:
-            st.error(f"エラー: {e}")
+            err_msg = str(e) or type(e).__name__
+            st.error(f"❌ エラー: {err_msg}")
+            with st.expander("詳細（クリックで展開）"):
+                st.code(traceback.format_exc())
 
 
 # ═══════════════════════════════════════════════════════════
@@ -419,8 +420,7 @@ elif st.session_state.page == "howto":
     st.markdown('<div class="page-title">📖 使い方</div>', unsafe_allow_html=True)
     st.markdown('<div class="page-subtitle">初めて使う方はこちらをご確認ください</div>', unsafe_allow_html=True)
 
-    with st.container():
-        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+    with st.container(border=True):
         st.markdown("#### スプレッドシートの準備")
         st.markdown("""
 **ヘッダー行に以下の列名を追加してください：**
@@ -434,10 +434,8 @@ elif st.session_state.page == "howto":
 
 > ヘッダー行は1行目でなくても大丈夫です（最初の10行を自動検索します）
         """)
-        st.markdown('</div>', unsafe_allow_html=True)
 
-    with st.container():
-        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+    with st.container(border=True):
         st.markdown("#### 取得手順")
         st.markdown("""
 <span class="step-badge">1</span> スプレッドシートをサービスアカウントと共有する（⚙️設定ページ参照）
@@ -450,10 +448,8 @@ elif st.session_state.page == "howto":
 
 <span class="step-badge">5</span> 自動でXの数値が取得され、シートに書き込まれます ✨
         """, unsafe_allow_html=True)
-        st.markdown('</div>', unsafe_allow_html=True)
 
-    with st.container():
-        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+    with st.container(border=True):
         st.markdown("#### よくある質問")
 
         with st.expander("「スプレッドシートが見つかりません」エラーが出る"):
@@ -479,7 +475,6 @@ Twitter APIのレート制限に達しています。
 Streamlit CloudのSecretsに`TWITTER_BEARER_TOKEN`が設定されていません。
 管理者にご連絡ください。
             """)
-        st.markdown('</div>', unsafe_allow_html=True)
 
 
 # ═══════════════════════════════════════════════════════════
@@ -489,8 +484,7 @@ elif st.session_state.page == "settings":
     st.markdown('<div class="page-title">⚙️ 設定・シート共有</div>', unsafe_allow_html=True)
     st.markdown('<div class="page-subtitle">スプレッドシートの共有設定を行います</div>', unsafe_allow_html=True)
 
-    with st.container():
-        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+    with st.container(border=True):
         st.markdown("#### スプレッドシートの共有方法")
         st.markdown("""
 このツールがスプレッドシートを読み書きするには、以下のサービスアカウントに**編集者権限**で共有する必要があります。
@@ -507,10 +501,8 @@ elif st.session_state.page == "settings":
 
 <span class="step-badge">4</span> 権限を「**編集者**」に設定して「送信」
         """, unsafe_allow_html=True)
-        st.markdown('</div>', unsafe_allow_html=True)
 
-    with st.container():
-        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+    with st.container(border=True):
         st.markdown("#### 接続テスト")
         st.markdown("スプレッドシートのURLを入力して、接続できるか確認できます。")
 
@@ -541,5 +533,7 @@ elif st.session_state.page == "settings":
                 except gspread.exceptions.SpreadsheetNotFound:
                     st.error("❌ スプレッドシートが見つかりません。共有設定を確認してください")
                 except Exception as e:
-                    st.error(f"❌ エラー: {e}")
-        st.markdown('</div>', unsafe_allow_html=True)
+                    err_msg = str(e) or type(e).__name__
+                    st.error(f"❌ エラー: {err_msg}")
+                    with st.expander("詳細"):
+                        st.code(traceback.format_exc())
