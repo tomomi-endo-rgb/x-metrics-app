@@ -494,24 +494,6 @@ if st.session_state.page == "fetch":
         st.markdown("<br>", unsafe_allow_html=True)
         run = st.button("▶ 取得開始", disabled=not sheet_id, type="primary", use_container_width=False)
 
-    # デバッグ用：1件テスト
-    with st.expander("🔧 1件だけテスト取得（デバッグ用）"):
-        st.caption("APIが何を返してくるか確認できます。数値が取れない場合に使ってください。")
-        test_url = st.text_input(
-            "テスト用 XのURL",
-            placeholder="https://x.com/username/status/1234567890",
-            key="debug_url",
-        )
-        if st.button("🔍 テスト取得", key="debug_btn"):
-            if test_url:
-                with st.spinner("取得中..."):
-                    metrics, raw = fetch_x(test_url, return_raw=True)
-                st.markdown("**取得結果：**")
-                st.json(metrics)
-                if raw:
-                    st.markdown("**APIの生レスポンス（全フィールド）：**")
-                    st.json(raw, expanded=False)
-
     if run:
         try:
             with st.spinner("シートに接続中..."):
