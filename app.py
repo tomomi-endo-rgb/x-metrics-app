@@ -266,6 +266,7 @@ SHEETS_TAB = "_登録シート"
 LOGS_TAB = "_実行ログ"
 SHEETS_HEADERS = ["シートID", "表示名", "登録日"]
 LOGS_HEADERS = ["ID", "実行時刻", "シート名", "シートID", "種別", "件数", "成功", "失敗", "所要時間", "ステータス", "URL一覧"]
+MANAGER_SHEET_NAME = "X Metrics Manager (Auto)"
 
 
 def get_gspread_client():
@@ -274,22 +275,32 @@ def get_gspread_client():
     creds_info = json.loads(creds_raw) if isinstance(creds_raw, str) else dict(creds_raw)
     creds = Credentials.from_service_account_info(
         creds_info,
-        scopes=["https://www.googleapis.com/auth/spreadsheets",
-                "https://www.googleapis.com/auth/drive.readonly"],
+        scopes=[
+            "https://www.googleapis.com/auth/spreadsheets",
+            "https://www.googleapis.com/auth/drive.file",
+        ],
     )
     return gspread.authorize(creds)
 
 
-def get_manager_workbook():
-    """管理用スプレッドシートを取得（未設定ならNone）"""
-    sheet_id = st.secrets.get("MANAGER_SHEET_ID", "")
-    if not sheet_id:
-        return None
+@st.cache_resource(show_spinner=False)
+def _open_or_create_manager():
+    """管理シートを取得（なければサービスアカウントが自動作成）"""
     try:
         gc = get_gspread_client()
-        return gc.open_by_key(sheet_id)
-    except Exception:
+        try:
+            return gc.open(MANAGER_SHEET_NAME)
+        except gspread.exceptions.SpreadsheetNotFound:
+            wb = gc.create(MANAGER_SHEET_NAME)
+            return wb
+    except Exception as e:
+        print(f"Manager workbook error: {e}")
         return None
+
+
+def get_manager_workbook():
+    """管理用スプレッドシートを取得（自動作成済み）"""
+    return _open_or_create_manager()
 
 
 def ensure_manager_tabs(workbook):
@@ -645,14 +656,8 @@ if st.session_state.page == "fetch":
     st.markdown('<div class="page-title">📊 数値を取得する</div>', unsafe_allow_html=True)
     st.markdown('<div class="page-subtitle">登録済みシートを選んで、Xポストの数値を一括取得します</div>', unsafe_allow_html=True)
 
-    # 管理シートが未設定なら案内
-    manager_ready = bool(st.secrets.get("MANAGER_SHEET_ID", ""))
-
     with st.container(border=True):
-        if manager_ready:
-            registered = get_registered_sheets()
-        else:
-            registered = []
+        registered = get_registered_sheets()
 
         sheet_id = ""
         sheet_index = 0
@@ -675,9 +680,8 @@ if st.session_state.page == "fetch":
                     m = re.search(r"/spreadsheets/d/([a-zA-Z0-9-_]+)", sheet_input)
                     sheet_id = m.group(1) if m else sheet_input.strip()
         else:
-            # 登録なし or 管理シート未設定 → URL直接入力
-            if not manager_ready:
-                st.warning("⚠️ 管理シートが未設定です。「📂 対象シート管理」から設定してください")
+            # 登録なし → URL直接入力
+            st.info("💡 「📂 対象シート管理」で登録するとドロップダウンから選べます")
             sheet_input = st.text_input(
                 "スプレッドシートのURLまたはID",
                 placeholder="https://docs.google.com/spreadsheets/d/xxxxxxxx/edit",
@@ -857,28 +861,10 @@ elif st.session_state.page == "sheets":
     st.markdown('<div class="page-title">📂 対象シート管理</div>', unsafe_allow_html=True)
     st.markdown('<div class="page-subtitle">よく使うスプレッドシートを登録すると、すぐに選んで取得できます</div>', unsafe_allow_html=True)
 
-    if not st.secrets.get("MANAGER_SHEET_ID", ""):
+    # 管理シートに接続できるか確認
+    if not get_manager_workbook():
         with st.container(border=True):
-            st.warning("⚠️ 管理用スプレッドシートがまだ設定されていません")
-            st.markdown("""
-このツールでシート登録・実行ログ機能を使うには、**管理用のスプレッドシート** を1つ用意する必要があります。
-
-#### 設定手順
-
-<span class="step-badge">1</span> 新しいGoogleスプレッドシートを作成（既存のものを使ってもOK）
-
-<span class="step-badge">2</span> そのシートを以下のメールに **編集者権限** で共有
-            """, unsafe_allow_html=True)
-            st.code("x-metrics-sheets@x-metrics-494110.iam.gserviceaccount.com", language=None)
-            st.markdown("""
-<span class="step-badge">3</span> シートのURLを開いて、`/d/` と `/edit` の間の **シートID** をコピー
-
-例: `https://docs.google.com/spreadsheets/d/`**`1AbC...XyZ`**`/edit`
-
-<span class="step-badge">4</span> Streamlit Cloudの **Settings → Secrets** に以下を追加：
-            """, unsafe_allow_html=True)
-            st.code('MANAGER_SHEET_ID = "ここにコピーしたシートIDを貼り付け"', language="toml")
-            st.markdown("<span class=\"step-badge\">5</span> Save → アプリをリロード（Ctrl + R）", unsafe_allow_html=True)
+            st.error("❌ 管理シートに接続できません。サービスアカウントの権限を確認してください")
         st.stop()
 
     registered = get_registered_sheets()
@@ -937,10 +923,9 @@ elif st.session_state.page == "logs":
     st.markdown('<div class="page-title">📋 実行ログ</div>', unsafe_allow_html=True)
     st.markdown('<div class="page-subtitle">過去の実行履歴を確認できます</div>', unsafe_allow_html=True)
 
-    if not st.secrets.get("MANAGER_SHEET_ID", ""):
+    if not get_manager_workbook():
         with st.container(border=True):
-            st.warning("⚠️ 管理用スプレッドシートが未設定のため、ログを表示できません")
-            st.info("「📂 対象シート管理」ページから設定方法を確認してください")
+            st.error("❌ 管理シートに接続できません。サービスアカウントの権限を確認してください")
         st.stop()
 
     try:
