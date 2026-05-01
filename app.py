@@ -227,6 +227,13 @@ section[data-testid="stSidebar"] .stButton > button:active {
     border: 1.5px solid #e0e0e0 !important;
 }
 
+/* シート検索ボックス */
+input[aria-label="シートを検索"] {
+    background: #f7f7f7 !important;
+    font-size: 0.88rem !important;
+    color: #555 !important;
+}
+
 /* ステップバッジ */
 .step-badge {
     display: inline-block;
@@ -761,12 +768,39 @@ if st.session_state.page == "fetch":
         sheet_index = 0
 
         if registered:
-            # 登録済みシートからドロップダウン選択
-            options = ["-- シートを選択 --"] + [f"{r.get('表示名', r.get('シートID', ''))}" for r in registered]
-            selected = st.selectbox("対象シート", options, key="fetch_sheet_select")
-            if selected != "-- シートを選択 --":
-                idx = options.index(selected) - 1
-                sheet_id = registered[idx]["シートID"]
+            # 登録済みシートから検索＆選択
+            search_col, _ = st.columns([3, 1])
+            with search_col:
+                sheet_search = st.text_input(
+                    "シートを検索",
+                    placeholder="名前で絞り込み…",
+                    key="fetch_sheet_search",
+                    label_visibility="collapsed",
+                )
+
+            all_names = [r.get("表示名", r.get("シートID", "")) for r in registered]
+            if sheet_search:
+                q = sheet_search.lower()
+                filtered_registered = [r for r in registered if q in r.get("表示名", r.get("シートID", "")).lower()]
+                filtered_names = [r.get("表示名", r.get("シートID", "")) for r in filtered_registered]
+            else:
+                filtered_registered = registered
+                filtered_names = all_names
+
+            if not filtered_names:
+                st.caption("該当するシートが見つかりません")
+                selected = None
+            else:
+                options = ["-- シートを選択 --"] + filtered_names
+                selected = st.selectbox(
+                    "対象シート",
+                    options,
+                    key="fetch_sheet_select",
+                    label_visibility="collapsed",
+                )
+                if selected and selected != "-- シートを選択 --":
+                    idx = filtered_names.index(selected)
+                    sheet_id = filtered_registered[idx]["シートID"]
 
             with st.expander("新しいシートで取得（登録せず一回だけ）"):
                 sheet_input = st.text_input(
