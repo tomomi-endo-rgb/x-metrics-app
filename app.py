@@ -1104,8 +1104,15 @@ elif st.session_state.page == "sheets":
                 sid = r.get("シートID", "")
                 name = r.get("表示名", sid)
                 regdate = r.get("登録日", "")
+                sheet_url = f"https://docs.google.com/spreadsheets/d/{sid}/edit"
                 col1, col2, col3 = st.columns([3, 2, 1])
-                col1.markdown(f"**{name}**  \n<span style='color:#888;font-size:0.8rem;'>`{sid[:30]}...`</span>", unsafe_allow_html=True)
+                col1.markdown(
+                    f"**{name}**  \n"
+                    f"<a href='{sheet_url}' target='_blank' style='color:#888;font-size:0.8rem;text-decoration:none;'>"
+                    f"<span class='material-icons' style='font-size:0.85rem;vertical-align:-2px;margin-right:3px;'>open_in_new</span>"
+                    f"{sid[:28]}…</a>",
+                    unsafe_allow_html=True,
+                )
                 col2.markdown(f"<span style='color:#888;font-size:0.85rem;'>登録日: {regdate}</span>", unsafe_allow_html=True)
                 if col3.button(":material/delete:", key=f"del_{sid}"):
                     if remove_registered_sheet(sid):
