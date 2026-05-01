@@ -20,8 +20,9 @@ st.set_page_config(
 
 # ─── グローバルCSS ─────────────────────────────────────────
 st.markdown("""
-<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..24,300..500,0..1,-25..0&display=swap" rel="stylesheet">
 <style>
+@import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..24,300..500,0..1,-25..0&display=swap');
+
 /* Material Symbols スタイル */
 .material-symbols-rounded {
     font-family: 'Material Symbols Rounded';
