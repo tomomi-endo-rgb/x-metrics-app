@@ -283,7 +283,7 @@ if not st.session_state.authenticated:
         """, unsafe_allow_html=True)
         pw = st.text_input("パスワード", type="password", placeholder="パスワードを入力")
         if st.button("ログイン", use_container_width=True, type="primary"):
-            if pw == st.secrets.get("APP_PASSWORD", "xmetrics2024"):
+            if pw == st.secrets.get("APP_PASSWORD", "xmetrics2026"):
                 st.session_state.authenticated = True
                 st.rerun()
             else:
