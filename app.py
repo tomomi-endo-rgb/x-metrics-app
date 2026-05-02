@@ -1347,8 +1347,12 @@ elif st.session_state.page == "howto":
     with st.container(border=True):
         st.markdown("#### 取得手順")
         st.markdown("""
-<span class="step-badge">1</span> 対象シートをサービスアカウントと共有する（設定ページ参照）
-
+<span class="step-badge">1</span> 対象シートをサービスアカウントと共有する
+        """, unsafe_allow_html=True)
+        if st.button(":material/settings: 設定ページを開く", key="goto_settings_from_howto"):
+            st.session_state.page = "settings"
+            st.rerun()
+        st.markdown("""
 <span class="step-badge">2</span>「対象シート管理」でシートを登録する
 
 <span class="step-badge">3</span>「数値を取得する」ページで登録済みシートを選ぶ
