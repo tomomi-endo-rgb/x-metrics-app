@@ -802,7 +802,7 @@ if st.session_state.page == "fetch":
                     idx = filtered_names.index(selected)
                     sheet_id = filtered_registered[idx]["シートID"]
 
-            with st.expander("新しいシートで取得（登録せず一回だけ）"):
+            with st.expander("URL直接入力で取得（登録不要）"):
                 sheet_input = st.text_input(
                     "スプレッドシートのURLまたはID",
                     placeholder="https://docs.google.com/spreadsheets/d/xxxxxxxx/edit",
