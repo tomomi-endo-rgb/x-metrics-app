@@ -482,6 +482,24 @@ def remove_registered_sheet(sheet_id: str) -> bool:
         return False
 
 
+def update_registered_sheet_name(sheet_id: str, new_name: str) -> bool:
+    """シートの表示名を更新"""
+    wb = get_manager_workbook()
+    if not wb:
+        return False
+    try:
+        sheets_ws, _ = ensure_manager_tabs(wb)
+        records = sheets_ws.get_all_records()
+        for i, r in enumerate(records, start=2):
+            if r.get("シートID") == sheet_id:
+                # 表示名はB列（2列目）
+                sheets_ws.update_cell(i, 2, new_name)
+                return True
+        return False
+    except Exception:
+        return False
+
+
 def append_log_to_manager(log_data: dict):
     """実行ログを管理シートに追記"""
     wb = get_manager_workbook()
@@ -1157,24 +1175,53 @@ elif st.session_state.page == "sheets":
             if not display_registered:
                 st.caption("該当するシートが見つかりません")
             else:
+                editing_sid = st.session_state.get("editing_sheet_sid", None)
                 for r in display_registered:
                     sid = r.get("シートID", "")
                     name = r.get("表示名", sid)
                     regdate = r.get("登録日", "")
                     sheet_url = f"https://docs.google.com/spreadsheets/d/{sid}/edit"
-                    col1, col2, col3 = st.columns([3, 2, 1])
-                    col1.markdown(
-                        f"**{name}**  \n"
-                        f"<a href='{sheet_url}' target='_blank' style='color:#888;font-size:0.8rem;text-decoration:none;'>"
-                        f"<span class='material-icons' style='font-size:0.85rem;vertical-align:-2px;margin-right:3px;'>open_in_new</span>"
-                        f"{sid[:28]}…</a>",
-                        unsafe_allow_html=True,
-                    )
-                    col2.markdown(f"<span style='color:#888;font-size:0.85rem;'>登録日: {regdate}</span>", unsafe_allow_html=True)
-                    if col3.button(":material/delete:", key=f"del_{sid}"):
-                        if remove_registered_sheet(sid):
-                            st.success(f"「{name}」の登録を解除しました")
+
+                    if editing_sid == sid:
+                        # 編集モード
+                        e_col1, e_col2, e_col3 = st.columns([5, 1, 1])
+                        new_display_name = e_col1.text_input(
+                            "表示名を編集",
+                            value=name,
+                            key=f"edit_name_{sid}",
+                            label_visibility="collapsed",
+                        )
+                        if e_col2.button(":material/check:", key=f"save_{sid}", type="primary"):
+                            if new_display_name and new_display_name.strip():
+                                if update_registered_sheet_name(sid, new_display_name.strip()):
+                                    st.session_state.editing_sheet_sid = None
+                                    st.success(f"表示名を「{new_display_name.strip()}」に更新しました")
+                                    st.rerun()
+                                else:
+                                    st.error("更新に失敗しました")
+                            else:
+                                st.warning("表示名を入力してください")
+                        if e_col3.button(":material/close:", key=f"cancel_{sid}"):
+                            st.session_state.editing_sheet_sid = None
                             st.rerun()
+                    else:
+                        # 通常表示モード
+                        col1, col2, col3, col4 = st.columns([3, 2, 0.6, 0.6])
+                        col1.markdown(
+                            f"**{name}**  \n"
+                            f"<a href='{sheet_url}' target='_blank' style='color:#888;font-size:0.8rem;text-decoration:none;'>"
+                            f"<span class='material-icons' style='font-size:0.85rem;vertical-align:-2px;margin-right:3px;'>open_in_new</span>"
+                            f"{sid[:28]}…</a>",
+                            unsafe_allow_html=True,
+                        )
+                        col2.markdown(f"<span style='color:#888;font-size:0.85rem;'>登録日: {regdate}</span>", unsafe_allow_html=True)
+                        if col3.button(":material/edit:", key=f"edit_{sid}", help="表示名を編集"):
+                            st.session_state.editing_sheet_sid = sid
+                            st.rerun()
+                        if col4.button(":material/delete:", key=f"del_{sid}", help="登録解除"):
+                            if remove_registered_sheet(sid):
+                                st.success(f"「{name}」の登録を解除しました")
+                                st.rerun()
 
 
 # ═══════════════════════════════════════════════════════════
