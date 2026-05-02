@@ -1091,7 +1091,7 @@ elif st.session_state.page == "sheets":
         with col_url:
             new_url = st.text_input("スプレッドシートのURL", placeholder="https://docs.google.com/spreadsheets/d/xxx/edit", key="reg_url")
         with col_name:
-            new_name = st.text_input("表示名（任意）", placeholder="例: メガポリスト", key="reg_name")
+            new_name = st.text_input("表示名（任意）", placeholder="例: 26年4月_オリエンシート", key="reg_name")
 
         if st.button("登録", type="primary", key="reg_btn"):
             if not new_url:
