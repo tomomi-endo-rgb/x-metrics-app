@@ -1100,24 +1100,81 @@ elif st.session_state.page == "sheets":
         if not registered:
             st.info("まだ登録されていません。上のフォームから登録してください")
         else:
-            for r in registered:
-                sid = r.get("シートID", "")
-                name = r.get("表示名", sid)
-                regdate = r.get("登録日", "")
-                sheet_url = f"https://docs.google.com/spreadsheets/d/{sid}/edit"
-                col1, col2, col3 = st.columns([3, 2, 1])
-                col1.markdown(
-                    f"**{name}**  \n"
-                    f"<a href='{sheet_url}' target='_blank' style='color:#888;font-size:0.8rem;text-decoration:none;'>"
-                    f"<span class='material-icons' style='font-size:0.85rem;vertical-align:-2px;margin-right:3px;'>open_in_new</span>"
-                    f"{sid[:28]}…</a>",
-                    unsafe_allow_html=True,
+            # 検索・ソートバー
+            s_col1, s_col2, s_col3 = st.columns([3, 2, 2])
+            with s_col1:
+                sheets_search = st.text_input(
+                    "シート検索",
+                    placeholder="名前・IDで絞り込み…",
+                    key="sheets_list_search",
+                    label_visibility="collapsed",
                 )
-                col2.markdown(f"<span style='color:#888;font-size:0.85rem;'>登録日: {regdate}</span>", unsafe_allow_html=True)
-                if col3.button(":material/delete:", key=f"del_{sid}"):
-                    if remove_registered_sheet(sid):
-                        st.success(f"「{name}」の登録を解除しました")
-                        st.rerun()
+            with s_col2:
+                sort_key = st.selectbox(
+                    "並び替え",
+                    ["登録日（新しい順）", "登録日（古い順）", "名前（A→Z）", "名前（Z→A）"],
+                    key="sheets_list_sort",
+                    label_visibility="collapsed",
+                )
+            with s_col3:
+                date_options = ["すべての期間"] + sorted(
+                    list({r.get("登録日", "")[:7] for r in registered if r.get("登録日")}),
+                    reverse=True,
+                )
+                date_filter = st.selectbox(
+                    "登録月",
+                    date_options,
+                    key="sheets_list_date",
+                    label_visibility="collapsed",
+                )
+
+            # フィルタ適用
+            display_registered = registered[:]
+            if sheets_search:
+                q = sheets_search.lower()
+                display_registered = [
+                    r for r in display_registered
+                    if q in r.get("表示名", "").lower() or q in r.get("シートID", "").lower()
+                ]
+            if date_filter != "すべての期間":
+                display_registered = [
+                    r for r in display_registered
+                    if r.get("登録日", "").startswith(date_filter)
+                ]
+
+            # ソート適用
+            if sort_key == "登録日（新しい順）":
+                display_registered = sorted(display_registered, key=lambda r: r.get("登録日", ""), reverse=True)
+            elif sort_key == "登録日（古い順）":
+                display_registered = sorted(display_registered, key=lambda r: r.get("登録日", ""))
+            elif sort_key == "名前（A→Z）":
+                display_registered = sorted(display_registered, key=lambda r: r.get("表示名", ""))
+            elif sort_key == "名前（Z→A）":
+                display_registered = sorted(display_registered, key=lambda r: r.get("表示名", ""), reverse=True)
+
+            st.caption(f"{len(display_registered)} / {len(registered)} 件")
+
+            if not display_registered:
+                st.caption("該当するシートが見つかりません")
+            else:
+                for r in display_registered:
+                    sid = r.get("シートID", "")
+                    name = r.get("表示名", sid)
+                    regdate = r.get("登録日", "")
+                    sheet_url = f"https://docs.google.com/spreadsheets/d/{sid}/edit"
+                    col1, col2, col3 = st.columns([3, 2, 1])
+                    col1.markdown(
+                        f"**{name}**  \n"
+                        f"<a href='{sheet_url}' target='_blank' style='color:#888;font-size:0.8rem;text-decoration:none;'>"
+                        f"<span class='material-icons' style='font-size:0.85rem;vertical-align:-2px;margin-right:3px;'>open_in_new</span>"
+                        f"{sid[:28]}…</a>",
+                        unsafe_allow_html=True,
+                    )
+                    col2.markdown(f"<span style='color:#888;font-size:0.85rem;'>登録日: {regdate}</span>", unsafe_allow_html=True)
+                    if col3.button(":material/delete:", key=f"del_{sid}"):
+                        if remove_registered_sheet(sid):
+                            st.success(f"「{name}」の登録を解除しました")
+                            st.rerun()
 
 
 # ═══════════════════════════════════════════════════════════
