@@ -253,13 +253,35 @@ input[aria-label="シートを検索"] {
 hr { border: none; border-top: 1px solid #eeeeee; margin: 1rem 0; }
 
 /* ログイン画面 */
-.login-box {
-    background: white;
-    border-radius: 16px;
-    padding: 2.5rem;
-    box-shadow: 0 2px 16px rgba(0,0,0,0.08);
-    max-width: 420px;
-    margin: 0 auto;
+.login-header {
+    text-align: center;
+    margin-bottom: 1.2rem;
+    padding: 1.2rem 1rem 0.8rem 1rem;
+}
+.login-logo {
+    font-size: 1.8rem;
+    line-height: 1;
+    margin-bottom: 0.4rem;
+    letter-spacing: -0.02em;
+}
+.login-title {
+    font-size: 1.15rem;
+    font-weight: 700;
+    color: #111;
+    letter-spacing: 0.02em;
+}
+.login-subtitle {
+    font-size: 0.78rem;
+    color: #999;
+    margin-top: 0.2rem;
+    letter-spacing: 0.05em;
+}
+.login-divider {
+    width: 28px;
+    height: 2px;
+    background: #111;
+    margin: 0.9rem auto 0 auto;
+    border-radius: 2px;
 }
 </style>
 """)
@@ -270,25 +292,24 @@ if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
 
 if not st.session_state.authenticated:
-    st.markdown("<br><br>", unsafe_allow_html=True)
-    col1, col2, col3 = st.columns([1, 1.2, 1])
+    st.markdown("<br><br><br>", unsafe_allow_html=True)
+    col1, col2, col3 = st.columns([1, 1.1, 1])
     with col2:
         st.markdown("""
-        <div class="login-box">
-            <div style="text-align:center; margin-bottom:1.5rem;">
-                <div style="font-size:2.5rem;">𝕏</div>
-                <div style="font-size:1.4rem; font-weight:700; color:#111;">X Metrics</div>
-                <div style="font-size:0.85rem; color:#888; margin-top:0.3rem;">Xポスト数値 自動取得ツール</div>
-            </div>
+        <div class="login-header">
+            <div class="login-logo">𝕏</div>
+            <div class="login-title">X Metrics</div>
+            <div class="login-subtitle">Xポスト数値 自動取得ツール</div>
+            <div class="login-divider"></div>
+        </div>
         """, unsafe_allow_html=True)
-        pw = st.text_input("パスワード", type="password", placeholder="パスワードを入力")
+        pw = st.text_input("パスワード", type="password", placeholder="パスワードを入力", label_visibility="collapsed")
         if st.button("ログイン", use_container_width=True, type="primary"):
             if pw == st.secrets.get("APP_PASSWORD", "xmetrics2026"):
                 st.session_state.authenticated = True
                 st.rerun()
             else:
                 st.error("パスワードが違います")
-        st.markdown("</div>", unsafe_allow_html=True)
     st.stop()
 
 
